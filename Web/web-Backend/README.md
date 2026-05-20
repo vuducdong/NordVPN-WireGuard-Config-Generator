@@ -8,7 +8,7 @@ This application serves as the API layer for the NordGen project. It interfaces 
 
 ## Prerequisites
 
-- Go 1.25+ (Recommended)
+- Go 1.26+ (Recommended)
 
 ## Installation
 
@@ -16,7 +16,7 @@ Clone the repository and download the dependencies:
 
 ```bash
 git clone https://github.com/mustafachyi/NordVPN-WireGuard-Config-Generator
-cd NordVPN-WireGuard-Config-Generator
+cd NordVPN-WireGuard-Config-Generator/Web/web-Backend
 go mod download
 ```
 
@@ -35,18 +35,9 @@ The server listens on port `3000` by default.
 To build and run the optimized production binary:
 
 ```bash
-# Build the binary with size optimizations (strip debug symbols)
 CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o server main.go
-
-# Run the binary
 ./server
 ```
-
-## Architecture
-
-- **Core Store**: Maintains a thread-safe in-memory cache of NordVPN servers, refreshed every 5 minutes. It also handles static asset serving with pre-compressed Brotli support and ETag caching.
-- **Validation**: Strict input validation ensures all data sent to upstream APIs or used in configuration generation is sanitized.
-- **Performance**: Utilizes **Fiber's** zero-allocation routing and Go's native concurrency model to handle high throughput with minimal resource usage.
 
 ## Static Assets
 

@@ -35,7 +35,6 @@ var (
 			IdleConnTimeout:     90 * time.Second,
 		},
 	}
-
 	bodyClose = []byte("</body>")
 )
 
