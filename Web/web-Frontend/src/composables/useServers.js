@@ -1,17 +1,19 @@
 import { shallowRef, computed, watch, markRaw } from 'vue'
 import { formatName } from '@/utils/utils'
+import { api } from '@/services/apiService'
 
 const INC = 24
 
 export function useServers() {
   const all = shallowRef([])
   const loading = shallowRef(false)
+  const error = shallowRef('')
   const sortKey = shallowRef('name')
   const sortOrd = shallowRef('asc')
   const fCountry = shallowRef('')
   const fCity = shallowRef('')
   const limit = shallowRef(INC)
-  
+
   const countries = shallowRef([])
   const cityMap = shallowRef({})
 
@@ -19,13 +21,13 @@ export function useServers() {
     const c = fCountry.value
     const t = fCity.value
     let list = all.value
-    
+
     if (c) list = list.filter(s => s.country === c)
     if (t) list = list.filter(s => s.city === t)
-    
+
     const k = sortKey.value
     const m = sortOrd.value === 'asc' ? 1 : -1
-    
+
     return [...list].sort((a, b) => {
       if (k === 'load') {
         const d = a.load - b.load
@@ -49,16 +51,16 @@ export function useServers() {
     fCity.value = l.length === 1 ? l[0].id : ''
     reset()
   })
-  
+
   watch([fCity, sortKey, sortOrd], reset)
 
   const init = async () => {
     loading.value = true
+    error.value = ''
     try {
-      const el = document.getElementById('server-data')
-      if (!el?.textContent) return
-      
-      const { h, l } = JSON.parse(el.textContent)
+      const { h, l } = await api.getServers()
+      if (!h || !l) throw new Error('Invalid server data')
+
       const idx = Object.fromEntries(h.map((k, i) => [k, i]))
       if (!['name', 'load', 'station'].every(k => k in idx)) throw new Error('Invalid data')
 
@@ -66,7 +68,7 @@ export function useServers() {
       const cSet = new Set()
       const cMap = {}
       const fmtCache = new Map()
-      
+
       const getFmt = s => {
         if (fmtCache.has(s)) return fmtCache.get(s)
         const v = formatName(s)
@@ -78,11 +80,11 @@ export function useServers() {
         cSet.add(cn)
         const cityList = []
         const dCountry = getFmt(cn)
-        
+
         for (const [ci, servers] of Object.entries(cities)) {
           cityList.push(ci)
           const dCity = getFmt(ci)
-          
+
           for (const t of servers) {
             list.push(markRaw({
               name: t[idx.name],
@@ -104,6 +106,7 @@ export function useServers() {
       countries.value = [...cSet].sort().map(c => ({ id: c, name: getFmt(c) }))
       cityMap.value = cMap
     } catch (e) {
+      error.value = e.message || 'Failed to load servers'
       console.error(e)
     } finally {
       loading.value = false
@@ -113,6 +116,7 @@ export function useServers() {
   return {
     visible,
     loading,
+    error,
     sortKey,
     sortOrd,
     fCountry,

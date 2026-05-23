@@ -200,55 +200,6 @@ func GenerateBatch(c fiber.Ctx) error {
 	})
 }
 
-func ServeFallback(c fiber.Ctx) error {
-	path := c.Path()
-	asset := store.Core.GetAsset(path)
-
-	if asset == nil {
-		if strings.HasPrefix(path, "/api") {
-			return c.Status(404).JSON(fiber.Map{"message": "Endpoint not found"})
-		}
-		asset = store.Core.GetAsset("/")
-		if asset != nil {
-			return ServeAsset(c, asset, "public, no-transform, max-age=300")
-		}
-		return c.SendStatus(404)
-	}
-
-	cc := "public, no-transform, max-age=300"
-	if strings.HasPrefix(path, "/assets") {
-		cc = "public, no-transform, max-age=31536000, immutable"
-	}
-
-	return ServeAsset(c, asset, cc)
-}
-
-func ServeAsset(c fiber.Ctx, asset *types.Asset, cacheTier string) error {
-	c.Set("ETag", asset.Etag)
-	c.Set("Cache-Control", cacheTier)
-	c.Set("Vary", "Accept-Encoding")
-
-	if c.Get("if-none-match") == asset.Etag {
-		return c.SendStatus(304)
-	}
-
-	c.Set("Content-Type", asset.Mime)
-
-	enc := c.Get("accept-encoding")
-
-	if asset.Brotli != nil && strings.Contains(enc, "br") {
-		c.Set("Content-Encoding", "br")
-		return c.Send(asset.Brotli)
-	}
-
-	if asset.Gzip != nil && strings.Contains(enc, "gzip") {
-		c.Set("Content-Encoding", "gzip")
-		return c.Send(asset.Gzip)
-	}
-
-	return c.Send(asset.Content)
-}
-
 func buildBatchPath(batchCountry, batchCity string, srv types.ProcessedServer) string {
 	srvCountry := srv.GetCountry()
 	srvCity := srv.GetCity()

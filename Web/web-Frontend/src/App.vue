@@ -25,7 +25,10 @@ let ro = null
 let ticking = false
 
 const mainView = computed(() => !ui.modals.value.key && !ui.modals.value.custom)
-const emptyMsg = computed(() => srv.fCountry.value ? 'No servers match criteria.' : 'No servers loaded.')
+const emptyMsg = computed(() => {
+  if (srv.error.value) return srv.error.value
+  return srv.fCountry.value ? 'No servers match criteria.' : 'No servers loaded.'
+})
 const dlLabel = computed(() => dlLoading.value ? 'Processing...' : srv.fCity.value ? 'Download City' : srv.fCountry.value ? 'Download Country' : 'Download All')
 
 const onScroll = () => {

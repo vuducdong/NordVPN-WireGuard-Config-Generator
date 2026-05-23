@@ -1,7 +1,7 @@
 package main
 
 import (
-	"embed"
+	"os"
 	"time"
 
 	"nordgen/internal/handler"
@@ -14,11 +14,13 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 )
 
-//go:embed all:public
-var publicFS embed.FS
-
 func main() {
-	store.Core.Init(publicFS)
+	store.Core.Init()
+
+	allowOrigins := []string{}
+	if origin := os.Getenv("FRONTEND_ORIGIN"); origin != "" {
+		allowOrigins = append(allowOrigins, origin)
+	}
 
 	app := fiber.New(fiber.Config{
 		BodyLimit:    4 * 1024 * 1024,
@@ -31,10 +33,14 @@ func main() {
 	})
 
 	app.Use(recover.New())
-	app.Use(cors.New())
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: allowOrigins,
+		AllowMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders: []string{"Content-Type", "If-None-Match"},
+		MaxAge:       86400,
+	}))
 
 	api := app.Group("/api")
-	api.Use(middleware.OriginGuard)
 
 	stdLimiter := middleware.NewLimiter(100, 1*time.Minute, "Rate limit exceeded")
 	heavyLimiter := middleware.NewLimiter(5, 1*time.Minute, "Rate limit exceeded for batch generation")
@@ -47,8 +53,6 @@ func main() {
 	api.Post("/config/qr", stdLimiter, handler.GenerateConfig("qr"))
 
 	api.Post("/config/batch", heavyLimiter, handler.GenerateBatch)
-
-	app.Use(handler.ServeFallback)
 
 	app.Listen(":3000", fiber.ListenConfig{
 		DisableStartupMessage: true,

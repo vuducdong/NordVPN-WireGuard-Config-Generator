@@ -2,15 +2,9 @@ package store
 
 import (
 	"bytes"
-	"embed"
-	"fmt"
-	"io/fs"
-	"mime"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -37,7 +31,6 @@ var (
 			IdleConnTimeout:     90 * time.Second,
 		},
 	}
-	bodyClose = []byte("</body>")
 )
 
 type RegionBoundary struct {
@@ -59,26 +52,17 @@ type State struct {
 	ServerJson   []byte
 	ServerJsonBr []byte
 	ServerEtag   string
-	IndexAsset   *types.Asset
 	PeerHostname [][]byte
 	PeerStation  [][]byte
 }
 
 type Store struct {
-	state    atomic.Pointer[State]
-	assets   map[string]*types.Asset
-	indexRaw []byte
-	assetSeq int
+	state atomic.Pointer[State]
 }
 
-var Core = &Store{
-	assets: make(map[string]*types.Asset),
-}
+var Core = &Store{}
 
-func (s *Store) Init(efs embed.FS) {
-	if err := s.loadAssets(efs); err != nil {
-		fmt.Printf("Asset load error: %v\n", err)
-	}
+func (s *Store) Init() {
 	s.updateServers()
 	go func() {
 		ticker := time.NewTicker(REFRESH)
@@ -90,243 +74,6 @@ func (s *Store) Init(efs embed.FS) {
 
 func (s *Store) LoadState() *State {
 	return s.state.Load()
-}
-
-func (s *Store) loadAssets(efs embed.FS) error {
-	err := fs.WalkDir(efs, "public", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		name := d.Name()
-		if strings.HasSuffix(name, ".br") || strings.HasSuffix(name, ".gz") {
-			return nil
-		}
-		content, err := efs.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		relPath, _ := filepath.Rel("public", path)
-		webPath := "/" + filepath.ToSlash(relPath)
-		if webPath == "/index.html" {
-			s.indexRaw = content
-			return nil
-		}
-		var brContent []byte
-		if data, err := efs.ReadFile(path + ".br"); err == nil {
-			brContent = data
-		}
-		var gzContent []byte
-		if data, err := efs.ReadFile(path + ".gz"); err == nil {
-			gzContent = data
-		}
-		mimeType := mime.TypeByExtension(filepath.Ext(path))
-		if mimeType == "" {
-			mimeType = "application/octet-stream"
-		}
-		s.assetSeq++
-		etag := buildEtag(len(content), int64(s.assetSeq))
-		s.assets[webPath] = &types.Asset{
-			Content: content,
-			Brotli:  brContent,
-			Gzip:    gzContent,
-			Mime:    mimeType,
-			Etag:    etag,
-		}
-		return nil
-	})
-	return err
-}
-
-func buildEtag(size int, seq int64) string {
-	buf := make([]byte, 0, 28)
-	buf = append(buf, '"')
-	buf = strconv.AppendInt(buf, int64(size), 16)
-	buf = append(buf, '-')
-	buf = strconv.AppendInt(buf, seq, 16)
-	buf = append(buf, '"')
-	return string(buf)
-}
-
-func buildServerEtag(ts int64) string {
-	buf := make([]byte, 0, 22)
-	buf = append(buf, '"')
-	buf = strconv.AppendInt(buf, ts, 16)
-	buf = append(buf, '"')
-	return string(buf)
-}
-
-func toLower(s string) string {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 'A' && s[i] <= 'Z' {
-			b := make([]byte, len(s))
-			copy(b, s[:i])
-			for ; i < len(s); i++ {
-				c := s[i]
-				if c >= 'A' && c <= 'Z' {
-					c += 32
-				}
-				b[i] = c
-			}
-			return string(b)
-		}
-	}
-	return s
-}
-
-func extractNumber(s string) string {
-	start := -1
-	for i := 0; i < len(s); i++ {
-		if s[i] >= '0' && s[i] <= '9' {
-			if start == -1 {
-				start = i
-			}
-		} else {
-			if start != -1 {
-				return s[start:i]
-			}
-		}
-	}
-	if start != -1 {
-		return s[start:]
-	}
-	return ""
-}
-
-func buildFileName(lowCode, number string) string {
-	buf := make([]byte, 0, len(lowCode)+len(number)+5)
-	buf = append(buf, lowCode...)
-	buf = append(buf, number...)
-	buf = append(buf, '.', 'c', 'o', 'n', 'f')
-	return string(buf)
-}
-
-func normalize(s string) string {
-	b := make([]byte, 0, len(s))
-	lastUnderscore := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
-			b = append(b, c)
-			lastUnderscore = false
-		} else {
-			if !lastUnderscore {
-				b = append(b, '_')
-				lastUnderscore = true
-			}
-		}
-	}
-	return string(b)
-}
-
-func validateVersion(v string) bool {
-	if len(v) < 3 {
-		return false
-	}
-	dot := -1
-	for i := 0; i < len(v); i++ {
-		if v[i] == '.' {
-			dot = i
-			break
-		}
-	}
-	if dot == -1 {
-		return false
-	}
-
-	maj := 0
-	for i := 0; i < dot; i++ {
-		if v[i] < '0' || v[i] > '9' {
-			return false
-		}
-		maj = maj*10 + int(v[i]-'0')
-		if maj > 999 {
-			return false
-		}
-	}
-
-	if maj > 2 {
-		return true
-	}
-	if maj < 2 {
-		return false
-	}
-
-	min := 0
-	start := dot + 1
-	if start >= len(v) {
-		return false
-	}
-
-	for i := start; i < len(v); i++ {
-		if v[i] == '.' {
-			break
-		}
-		if v[i] < '0' || v[i] > '9' {
-			return false
-		}
-		min = min*10 + int(v[i]-'0')
-		if min > 999 {
-			return false
-		}
-	}
-
-	return min >= 1
-}
-
-func getString(b []byte) string {
-	for i := 0; i < len(b); i++ {
-		if b[i] == 0 {
-			if i == 0 {
-				return ""
-			}
-			return unsafe.String(&b[0], i)
-		}
-	}
-	if len(b) == 0 {
-		return ""
-	}
-	return unsafe.String(&b[0], len(b))
-}
-
-func getBytes(b []byte) []byte {
-	for i := 0; i < len(b); i++ {
-		if b[i] == 0 {
-			return b[:i]
-		}
-	}
-	return b
-}
-
-func copyToBytes(dst []byte, src string) {
-	limit := len(dst)
-	if len(src) < limit {
-		limit = len(src)
-	}
-	copy(dst[:limit], src[:limit])
-	if limit < len(dst) {
-		dst[limit] = 0
-	}
-}
-
-func computeRegionHash(country, city string) uint64 {
-	var hash uint64 = 14695981039346656037
-	for i := 0; i < len(country); i++ {
-		hash ^= uint64(country[i])
-		hash *= 1099511628211
-	}
-	hash ^= uint64('/')
-	hash *= 1099511628211
-	for i := 0; i < len(city); i++ {
-		hash ^= uint64(city[i])
-		hash *= 1099511628211
-	}
-	return hash
 }
 
 func (s *Store) updateServers() {
@@ -572,48 +319,7 @@ func (s *Store) updateServers() {
 	state.ServerJsonBr = brBuf.Bytes()
 	state.ServerEtag = buildServerEtag(time.Now().UnixNano())
 
-	s.rebuildIndex(state)
 	s.state.Store(state)
-}
-
-func (s *Store) rebuildIndex(state *State) {
-	if s.indexRaw == nil {
-		return
-	}
-
-	scriptPrefix := []byte(`<script id="server-data" type="application/json">`)
-	scriptSuffix := []byte(`</script>`)
-
-	injection := make([]byte, 0, len(scriptPrefix)+len(state.ServerJson)+len(scriptSuffix)+len(bodyClose))
-	injection = append(injection, scriptPrefix...)
-	injection = append(injection, state.ServerJson...)
-	injection = append(injection, scriptSuffix...)
-	injection = append(injection, bodyClose...)
-
-	content := bytes.Replace(s.indexRaw, bodyClose, injection, 1)
-
-	var brBuf bytes.Buffer
-	brw := brotli.NewWriterLevel(&brBuf, 1)
-	brw.Write(content)
-	brw.Close()
-
-	state.IndexAsset = &types.Asset{
-		Content: content,
-		Brotli:  brBuf.Bytes(),
-		Mime:    "text/html; charset=utf-8",
-		Etag:    state.ServerEtag,
-	}
-}
-
-func (s *Store) GetAsset(path string) *types.Asset {
-	if path == "/" || path == "/index.html" {
-		state := s.state.Load()
-		if state == nil {
-			return nil
-		}
-		return state.IndexAsset
-	}
-	return s.assets[path]
 }
 
 func (s *Store) GetServerList() ([]byte, []byte, string) {
@@ -701,4 +407,183 @@ func (s *State) SearchBoundary(hash uint64) int {
 		}
 	}
 	return -1
+}
+
+func buildServerEtag(ts int64) string {
+	buf := make([]byte, 0, 22)
+	buf = append(buf, '"')
+	buf = strconv.AppendInt(buf, ts, 16)
+	buf = append(buf, '"')
+	return string(buf)
+}
+
+func toLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			b := make([]byte, len(s))
+			copy(b, s[:i])
+			for ; i < len(s); i++ {
+				c := s[i]
+				if c >= 'A' && c <= 'Z' {
+					c += 32
+				}
+				b[i] = c
+			}
+			return string(b)
+		}
+	}
+	return s
+}
+
+func extractNumber(s string) string {
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			if start == -1 {
+				start = i
+			}
+		} else {
+			if start != -1 {
+				return s[start:i]
+			}
+		}
+	}
+	if start != -1 {
+		return s[start:]
+	}
+	return ""
+}
+
+func buildFileName(lowCode, number string) string {
+	buf := make([]byte, 0, len(lowCode)+len(number)+5)
+	buf = append(buf, lowCode...)
+	buf = append(buf, number...)
+	buf = append(buf, '.', 'c', 'o', 'n', 'f')
+	return string(buf)
+}
+
+func normalize(s string) string {
+	b := make([]byte, 0, len(s))
+	lastUnderscore := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 32
+		}
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b = append(b, c)
+			lastUnderscore = false
+		} else {
+			if !lastUnderscore {
+				b = append(b, '_')
+				lastUnderscore = true
+			}
+		}
+	}
+	return string(b)
+}
+
+func validateVersion(v string) bool {
+	if len(v) < 3 {
+		return false
+	}
+	dot := -1
+	for i := 0; i < len(v); i++ {
+		if v[i] == '.' {
+			dot = i
+			break
+		}
+	}
+	if dot == -1 {
+		return false
+	}
+
+	maj := 0
+	for i := 0; i < dot; i++ {
+		if v[i] < '0' || v[i] > '9' {
+			return false
+		}
+		maj = maj*10 + int(v[i]-'0')
+		if maj > 999 {
+			return false
+		}
+	}
+
+	if maj > 2 {
+		return true
+	}
+	if maj < 2 {
+		return false
+	}
+
+	min := 0
+	start := dot + 1
+	if start >= len(v) {
+		return false
+	}
+
+	for i := start; i < len(v); i++ {
+		if v[i] == '.' {
+			break
+		}
+		if v[i] < '0' || v[i] > '9' {
+			return false
+		}
+		min = min*10 + int(v[i]-'0')
+		if min > 999 {
+			return false
+		}
+	}
+
+	return min >= 1
+}
+
+func getString(b []byte) string {
+	for i := 0; i < len(b); i++ {
+		if b[i] == 0 {
+			if i == 0 {
+				return ""
+			}
+			return unsafe.String(&b[0], i)
+		}
+	}
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
+}
+
+func getBytes(b []byte) []byte {
+	for i := 0; i < len(b); i++ {
+		if b[i] == 0 {
+			return b[:i]
+		}
+	}
+	return b
+}
+
+func copyToBytes(dst []byte, src string) {
+	limit := len(dst)
+	if len(src) < limit {
+		limit = len(src)
+	}
+	copy(dst[:limit], src[:limit])
+	if limit < len(dst) {
+		dst[limit] = 0
+	}
+}
+
+func computeRegionHash(country, city string) uint64 {
+	var hash uint64 = 14695981039346656037
+	for i := 0; i < len(country); i++ {
+		hash ^= uint64(country[i])
+		hash *= 1099511628211
+	}
+	hash ^= uint64('/')
+	hash *= 1099511628211
+	for i := 0; i < len(city); i++ {
+		hash ^= uint64(city[i])
+		hash *= 1099511628211
+	}
+	return hash
 }

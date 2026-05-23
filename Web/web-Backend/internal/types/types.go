@@ -85,14 +85,6 @@ type ServerPayload struct {
 	List    map[string]map[string][][]interface{} `json:"l"`
 }
 
-type Asset struct {
-	Content []byte
-	Brotli  []byte
-	Gzip    []byte
-	Mime    string
-	Etag    string
-}
-
 func getString(b []byte) string {
 	for i := 0; i < len(b); i++ {
 		if b[i] == 0 {

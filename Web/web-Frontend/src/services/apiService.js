@@ -1,4 +1,4 @@
-const BASE = '/api'
+const BASE = import.meta.env.VITE_API_BASE || '/api'
 const TIMEOUT = 60000
 const MIME = { json: 'application/json', wg: 'application/x-wireguard-config', img: 'image/', zip: 'application/zip', bin: 'application/octet-stream' }
 
@@ -11,7 +11,7 @@ async function req(end, opt = {}) {
       headers: { 'Content-Type': MIME.json, ...opt.headers },
       signal: c.signal
     })
-    
+
     if (!r.ok) {
       let m = `HTTP ${r.status}`
       try {
@@ -34,6 +34,7 @@ async function req(end, opt = {}) {
 }
 
 export const api = {
+  getServers: () => req('/servers'),
   genKey: token => req('/key', { method: 'POST', body: JSON.stringify({ token }) }),
   genConfig: data => req('/config', { method: 'POST', body: JSON.stringify(data) }),
   dlConfig: async data => {
