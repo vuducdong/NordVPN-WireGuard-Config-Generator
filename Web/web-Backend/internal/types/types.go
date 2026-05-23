@@ -1,5 +1,7 @@
 package types
 
+import "unsafe"
+
 type ConfigRequest struct {
 	Token      string `json:"token"`
 	Country    string `json:"country"`
@@ -65,16 +67,17 @@ type RawServer struct {
 }
 
 type ProcessedServer struct {
-	Name     string
-	Station  string
-	Hostname string
-	Country  string
-	City     string
-	Code     string
-	LowCode  string
-	Number   string
-	FileName string
-	KeyID    int
+	Name            [16]byte
+	Station         [48]byte
+	Hostname        [64]byte
+	Country         [32]byte
+	City            [32]byte
+	Code            [4]byte
+	LowCode         [4]byte
+	Number          [8]byte
+	FileName        [24]byte
+	CityDedupSuffix [8]byte
+	KeyID           uint16
 }
 
 type ServerPayload struct {
@@ -88,4 +91,59 @@ type Asset struct {
 	Gzip    []byte
 	Mime    string
 	Etag    string
+}
+
+func getString(b []byte) string {
+	for i := 0; i < len(b); i++ {
+		if b[i] == 0 {
+			if i == 0 {
+				return ""
+			}
+			return unsafe.String(&b[0], i)
+		}
+	}
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
+}
+
+func (p *ProcessedServer) GetName() string {
+	return getString(p.Name[:])
+}
+
+func (p *ProcessedServer) GetStation() string {
+	return getString(p.Station[:])
+}
+
+func (p *ProcessedServer) GetHostname() string {
+	return getString(p.Hostname[:])
+}
+
+func (p *ProcessedServer) GetCountry() string {
+	return getString(p.Country[:])
+}
+
+func (p *ProcessedServer) GetCity() string {
+	return getString(p.City[:])
+}
+
+func (p *ProcessedServer) GetCode() string {
+	return getString(p.Code[:])
+}
+
+func (p *ProcessedServer) GetLowCode() string {
+	return getString(p.LowCode[:])
+}
+
+func (p *ProcessedServer) GetNumber() string {
+	return getString(p.Number[:])
+}
+
+func (p *ProcessedServer) GetFileName() string {
+	return getString(p.FileName[:])
+}
+
+func (p *ProcessedServer) GetCityDedupSuffix() string {
+	return getString(p.CityDedupSuffix[:])
 }

@@ -2,27 +2,29 @@ package store
 
 import (
 	"bytes"
+	"embed"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"nordgen/internal/types"
+	"nordgen/internal/wg"
 
 	"github.com/andybalholm/brotli"
 	"github.com/bytedance/sonic"
-	kgzip "github.com/klauspost/compress/gzip"
 )
 
 const (
-	API_URL    = "https://api.nordvpn.com/v1/servers?limit=16384&filters[servers_technologies][identifier]=wireguard_udp"
-	PUBLIC_DIR = "./public"
-	REFRESH    = 5 * time.Minute
+	API_URL = "https://api.nordvpn.com/v1/servers?limit=16384&filters[servers_technologies][identifier]=wireguard_udp"
+	REFRESH = 5 * time.Minute
 )
 
 var (
@@ -38,15 +40,28 @@ var (
 	bodyClose = []byte("</body>")
 )
 
+type RegionBoundary struct {
+	Hash  uint64
+	Start uint32
+	End   uint32
+}
+
+type NameIndexEntry struct {
+	Name [16]byte
+	Idx  uint32
+}
+
 type State struct {
-	Servers     map[string]types.ProcessedServer
-	Keys        map[int]string
-	RegionIndex map[string]map[string][]types.ProcessedServer
-	CountryFlat map[string][]types.ProcessedServer
-	AllServers  []types.ProcessedServer
-	ServerJson  []byte
-	ServerEtag  string
-	IndexAsset  *types.Asset
+	AllServers   []types.ProcessedServer
+	NameIndex    []NameIndexEntry
+	Keys         map[int]string
+	Boundaries   []RegionBoundary
+	ServerJson   []byte
+	ServerJsonBr []byte
+	ServerEtag   string
+	IndexAsset   *types.Asset
+	PeerHostname [][]byte
+	PeerStation  [][]byte
 }
 
 type Store struct {
@@ -60,8 +75,8 @@ var Core = &Store{
 	assets: make(map[string]*types.Asset),
 }
 
-func (s *Store) Init() {
-	if err := s.loadAssets(PUBLIC_DIR); err != nil {
+func (s *Store) Init(efs embed.FS) {
+	if err := s.loadAssets(efs); err != nil {
 		fmt.Printf("Asset load error: %v\n", err)
 	}
 	s.updateServers()
@@ -77,69 +92,42 @@ func (s *Store) LoadState() *State {
 	return s.state.Load()
 }
 
-func (s *Store) loadAssets(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		path := filepath.Join(dir, entry.Name())
-		if entry.IsDir() {
-			if err := s.loadAssets(path); err != nil {
-				return err
-			}
-			continue
-		}
-
-		name := entry.Name()
-		if strings.HasSuffix(name, ".br") || strings.HasSuffix(name, ".gz") {
-			continue
-		}
-
-		content, err := os.ReadFile(path)
+func (s *Store) loadAssets(efs embed.FS) error {
+	err := fs.WalkDir(efs, "public", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return err
 		}
-
-		relPath, _ := filepath.Rel(PUBLIC_DIR, path)
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, ".br") || strings.HasSuffix(name, ".gz") {
+			return nil
+		}
+		content, err := efs.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		relPath, _ := filepath.Rel("public", path)
 		webPath := "/" + filepath.ToSlash(relPath)
-
 		if webPath == "/index.html" {
 			s.indexRaw = content
-			continue
+			return nil
 		}
-
 		var brContent []byte
-		if data, err := os.ReadFile(path + ".br"); err == nil {
+		if data, err := efs.ReadFile(path + ".br"); err == nil {
 			brContent = data
-		} else {
-			var brBuf bytes.Buffer
-			brw := brotli.NewWriterLevel(&brBuf, brotli.BestCompression)
-			brw.Write(content)
-			brw.Close()
-			brContent = brBuf.Bytes()
 		}
-
 		var gzContent []byte
-		if data, err := os.ReadFile(path + ".gz"); err == nil {
+		if data, err := efs.ReadFile(path + ".gz"); err == nil {
 			gzContent = data
-		} else {
-			var gzBuf bytes.Buffer
-			gzw, _ := kgzip.NewWriterLevel(&gzBuf, kgzip.BestCompression)
-			gzw.Write(content)
-			gzw.Close()
-			gzContent = gzBuf.Bytes()
 		}
-
 		mimeType := mime.TypeByExtension(filepath.Ext(path))
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-
 		s.assetSeq++
 		etag := buildEtag(len(content), int64(s.assetSeq))
-
 		s.assets[webPath] = &types.Asset{
 			Content: content,
 			Brotli:  brContent,
@@ -147,8 +135,9 @@ func (s *Store) loadAssets(dir string) error {
 			Mime:    mimeType,
 			Etag:    etag,
 		}
-	}
-	return nil
+		return nil
+	})
+	return err
 }
 
 func buildEtag(size int, seq int64) string {
@@ -290,6 +279,56 @@ func validateVersion(v string) bool {
 	return min >= 1
 }
 
+func getString(b []byte) string {
+	for i := 0; i < len(b); i++ {
+		if b[i] == 0 {
+			if i == 0 {
+				return ""
+			}
+			return unsafe.String(&b[0], i)
+		}
+	}
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
+}
+
+func getBytes(b []byte) []byte {
+	for i := 0; i < len(b); i++ {
+		if b[i] == 0 {
+			return b[:i]
+		}
+	}
+	return b
+}
+
+func copyToBytes(dst []byte, src string) {
+	limit := len(dst)
+	if len(src) < limit {
+		limit = len(src)
+	}
+	copy(dst[:limit], src[:limit])
+	if limit < len(dst) {
+		dst[limit] = 0
+	}
+}
+
+func computeRegionHash(country, city string) uint64 {
+	var hash uint64 = 14695981039346656037
+	for i := 0; i < len(country); i++ {
+		hash ^= uint64(country[i])
+		hash *= 1099511628211
+	}
+	hash ^= uint64('/')
+	hash *= 1099511628211
+	for i := 0; i < len(city); i++ {
+		hash ^= uint64(city[i])
+		hash *= 1099511628211
+	}
+	return hash
+}
+
 func (s *Store) updateServers() {
 	resp, err := refreshClient.Get(API_URL)
 	if err != nil {
@@ -307,10 +346,8 @@ func (s *Store) updateServers() {
 	}
 
 	state := &State{
-		Servers:     make(map[string]types.ProcessedServer, len(raw)),
-		Keys:        make(map[int]string, len(raw)),
-		RegionIndex: make(map[string]map[string][]types.ProcessedServer),
-		CountryFlat: make(map[string][]types.ProcessedServer),
+		AllServers: make([]types.ProcessedServer, 0, len(raw)),
+		Keys:       make(map[int]string, len(raw)),
 	}
 
 	newKeys := make(map[string]int, len(raw))
@@ -348,10 +385,6 @@ func (s *Store) updateServers() {
 		}
 
 		name := normalize(srv.Name)
-		if _, seen := state.Servers[name]; seen {
-			continue
-		}
-
 		loc := srv.Locations[0]
 		var pk string
 		for _, tech := range srv.Technologies {
@@ -386,46 +419,143 @@ func (s *Store) updateServers() {
 		}
 		fileName := buildFileName(lowCode, num)
 
-		processed := types.ProcessedServer{
-			Name:     name,
-			Station:  srv.Station,
-			Hostname: srv.Hostname,
-			Country:  country,
-			City:     city,
-			Code:     code,
-			LowCode:  lowCode,
-			Number:   num,
-			FileName: fileName,
-			KeyID:    id,
-		}
+		processed := types.ProcessedServer{}
+		copyToBytes(processed.Name[:], name)
+		copyToBytes(processed.Station[:], srv.Station)
+		copyToBytes(processed.Hostname[:], srv.Hostname)
+		copyToBytes(processed.Country[:], country)
+		copyToBytes(processed.City[:], city)
+		copyToBytes(processed.Code[:], code)
+		copyToBytes(processed.LowCode[:], lowCode)
+		copyToBytes(processed.Number[:], num)
+		copyToBytes(processed.FileName[:], fileName)
+		processed.KeyID = uint16(id)
 
-		state.Servers[name] = processed
+		state.AllServers = append(state.AllServers, processed)
 
 		if payload.List[country] == nil {
 			payload.List[country] = make(map[string][][]interface{})
-			state.RegionIndex[country] = make(map[string][]types.ProcessedServer)
 		}
 
 		payload.List[country][city] = append(payload.List[country][city], []interface{}{name, srv.Load, srv.Station})
-		state.RegionIndex[country][city] = append(state.RegionIndex[country][city], processed)
 	}
 
-	allServers := make([]types.ProcessedServer, 0, len(state.Servers))
-	for _, srv := range state.Servers {
-		allServers = append(allServers, srv)
-	}
-	state.AllServers = allServers
+	sort.Slice(state.AllServers, func(i, j int) bool {
+		ci := state.AllServers[i].GetCountry()
+		cj := state.AllServers[j].GetCountry()
+		if ci != cj {
+			return ci < cj
+		}
+		ti := state.AllServers[i].GetCity()
+		tj := state.AllServers[j].GetCity()
+		if ti != tj {
+			return ti < tj
+		}
+		return state.AllServers[i].GetName() < state.AllServers[j].GetName()
+	})
 
-	for country, cities := range state.RegionIndex {
-		var count int
-		for _, srvs := range cities {
-			count += len(srvs)
+	nameIndex := make([]NameIndexEntry, len(state.AllServers))
+	for i := 0; i < len(state.AllServers); i++ {
+		nameIndex[i] = NameIndexEntry{
+			Name: state.AllServers[i].Name,
+			Idx:  uint32(i),
 		}
-		flat := make([]types.ProcessedServer, 0, count)
-		for _, srvs := range cities {
-			flat = append(flat, srvs...)
+	}
+	sort.Slice(nameIndex, func(i, j int) bool {
+		ni := getString(nameIndex[i].Name[:])
+		nj := getString(nameIndex[j].Name[:])
+		return ni < nj
+	})
+	state.NameIndex = nameIndex
+
+	boundaries := []RegionBoundary{}
+	n := len(state.AllServers)
+	if n > 0 {
+		start := 0
+		currentCountry := state.AllServers[0].GetCountry()
+		currentCity := state.AllServers[0].GetCity()
+
+		for i := 1; i <= n; i++ {
+			var country, city string
+			if i < n {
+				country = state.AllServers[i].GetCountry()
+				city = state.AllServers[i].GetCity()
+			}
+			if i == n || country != currentCountry || city != currentCity {
+				hash := computeRegionHash(currentCountry, currentCity)
+				boundaries = append(boundaries, RegionBoundary{
+					Hash:  hash,
+					Start: uint32(start),
+					End:   uint32(i),
+				})
+				if i < n {
+					start = i
+					currentCountry = country
+					currentCity = city
+				}
+			}
 		}
-		state.CountryFlat[country] = flat
+
+		start = 0
+		currentCountry = state.AllServers[0].GetCountry()
+		for i := 1; i <= n; i++ {
+			var country string
+			if i < n {
+				country = state.AllServers[i].GetCountry()
+			}
+			if i == n || country != currentCountry {
+				hash := computeRegionHash(currentCountry, "")
+				boundaries = append(boundaries, RegionBoundary{
+					Hash:  hash,
+					Start: uint32(start),
+					End:   uint32(i),
+				})
+				if i < n {
+					start = i
+					currentCountry = country
+				}
+			}
+		}
+	}
+
+	sort.Slice(boundaries, func(i, j int) bool {
+		return boundaries[i].Hash < boundaries[j].Hash
+	})
+	state.Boundaries = boundaries
+
+	peerHostname := make([][]byte, len(state.AllServers))
+	peerStation := make([][]byte, len(state.AllServers))
+	for i := range state.AllServers {
+		srv := state.AllServers[i]
+		pk := state.Keys[int(srv.KeyID)]
+		peerHostname[i] = wg.BuildPeerPrefix(pk, getBytes(srv.Hostname[:]))
+		peerStation[i] = wg.BuildPeerPrefix(pk, getBytes(srv.Station[:]))
+	}
+	state.PeerHostname = peerHostname
+	state.PeerStation = peerStation
+
+	cityStart := 0
+	for cityStart < n {
+		cityEnd := cityStart + 1
+		for cityEnd < n &&
+			state.AllServers[cityEnd].GetCity() == state.AllServers[cityStart].GetCity() &&
+			state.AllServers[cityEnd].GetCountry() == state.AllServers[cityStart].GetCountry() {
+			cityEnd++
+		}
+
+		seenNames := make(map[string]int)
+		for i := cityStart; i < cityEnd; i++ {
+			fileName := state.AllServers[i].GetFileName()
+			base := fileName[:len(fileName)-5]
+			count := seenNames[base]
+			seenNames[base] = count + 1
+			if count > 0 {
+				suffix := "_" + strconv.Itoa(count)
+				copyToBytes(state.AllServers[i].CityDedupSuffix[:], suffix)
+			}
+		}
+
+		cityStart = cityEnd
 	}
 
 	jsonData, err := sonic.Marshal(payload)
@@ -433,7 +563,13 @@ func (s *Store) updateServers() {
 		return
 	}
 
+	var brBuf bytes.Buffer
+	brw := brotli.NewWriterLevel(&brBuf, 1)
+	brw.Write(jsonData)
+	brw.Close()
+
 	state.ServerJson = jsonData
+	state.ServerJsonBr = brBuf.Bytes()
 	state.ServerEtag = buildServerEtag(time.Now().UnixNano())
 
 	s.rebuildIndex(state)
@@ -457,19 +593,13 @@ func (s *Store) rebuildIndex(state *State) {
 	content := bytes.Replace(s.indexRaw, bodyClose, injection, 1)
 
 	var brBuf bytes.Buffer
-	brw := brotli.NewWriterLevel(&brBuf, brotli.BestCompression)
+	brw := brotli.NewWriterLevel(&brBuf, 1)
 	brw.Write(content)
 	brw.Close()
-
-	var gzBuf bytes.Buffer
-	gzw, _ := kgzip.NewWriterLevel(&gzBuf, kgzip.BestCompression)
-	gzw.Write(content)
-	gzw.Close()
 
 	state.IndexAsset = &types.Asset{
 		Content: content,
 		Brotli:  brBuf.Bytes(),
-		Gzip:    gzBuf.Bytes(),
 		Mime:    "text/html; charset=utf-8",
 		Etag:    state.ServerEtag,
 	}
@@ -486,12 +616,12 @@ func (s *Store) GetAsset(path string) *types.Asset {
 	return s.assets[path]
 }
 
-func (s *Store) GetServerList() ([]byte, string) {
+func (s *Store) GetServerList() ([]byte, []byte, string) {
 	state := s.state.Load()
 	if state == nil {
-		return nil, ""
+		return nil, nil, ""
 	}
-	return state.ServerJson, state.ServerEtag
+	return state.ServerJson, state.ServerJsonBr, state.ServerEtag
 }
 
 func (s *Store) GetServer(name string) (types.ProcessedServer, bool) {
@@ -499,8 +629,11 @@ func (s *Store) GetServer(name string) (types.ProcessedServer, bool) {
 	if state == nil {
 		return types.ProcessedServer{}, false
 	}
-	v, ok := state.Servers[name]
-	return v, ok
+	idx, found := state.SearchByName(name)
+	if !found {
+		return types.ProcessedServer{}, false
+	}
+	return state.AllServers[idx], true
 }
 
 func (s *Store) GetKey(id int) (string, bool) {
@@ -517,25 +650,55 @@ func (s *Store) GetBatch(country, city string) []types.ProcessedServer {
 	if state == nil {
 		return nil
 	}
-	return s.GetBatchFromState(state, country, city)
+	servers, _ := s.GetBatchFromState(state, country, city)
+	return servers
 }
 
-func (s *Store) GetBatchFromState(state *State, country, city string) []types.ProcessedServer {
+func (s *Store) GetBatchFromState(state *State, country, city string) ([]types.ProcessedServer, uint32) {
 	cKey := normalize(country)
 	tKey := normalize(city)
 
 	if cKey == "" {
-		return state.AllServers
+		return state.AllServers, 0
 	}
 
-	if tKey == "" {
-		return state.CountryFlat[cKey]
+	hash := computeRegionHash(cKey, tKey)
+	idx := state.SearchBoundary(hash)
+	if idx == -1 {
+		return nil, 0
 	}
+	bound := state.Boundaries[idx]
+	return state.AllServers[bound.Start:bound.End], bound.Start
+}
 
-	cities, ok := state.RegionIndex[cKey]
-	if !ok {
-		return nil
+func (s *State) SearchByName(name string) (int, bool) {
+	low, high := 0, len(s.NameIndex)-1
+	for low <= high {
+		mid := (low + high) >> 1
+		midName := getString(s.NameIndex[mid].Name[:])
+		if midName < name {
+			low = mid + 1
+		} else if midName > name {
+			high = mid - 1
+		} else {
+			return int(s.NameIndex[mid].Idx), true
+		}
 	}
+	return -1, false
+}
 
-	return cities[tKey]
+func (s *State) SearchBoundary(hash uint64) int {
+	low, high := 0, len(s.Boundaries)-1
+	for low <= high {
+		mid := (low + high) >> 1
+		val := s.Boundaries[mid].Hash
+		if val < hash {
+			low = mid + 1
+		} else if val > hash {
+			high = mid - 1
+		} else {
+			return mid
+		}
+	}
+	return -1
 }

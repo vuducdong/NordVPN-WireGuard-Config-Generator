@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +29,7 @@ var httpClient = &http.Client{
 }
 
 func GetServers(c fiber.Ctx) error {
-	data, etag := store.Core.GetServerList()
+	data, brData, etag := store.Core.GetServerList()
 	if data == nil {
 		return c.Status(503).JSON(fiber.Map{"error": "Initializing"})
 	}
@@ -41,6 +40,10 @@ func GetServers(c fiber.Ctx) error {
 		return c.SendStatus(304)
 	}
 	c.Set("Content-Type", "application/json; charset=utf-8")
+	if brData != nil && strings.Contains(c.Get("Accept-Encoding"), "br") {
+		c.Set("Content-Encoding", "br")
+		return c.Send(brData)
+	}
 	return c.Send(data)
 }
 
@@ -104,19 +107,23 @@ func GenerateConfig(outputType string) fiber.Handler {
 			return c.Status(503).JSON(fiber.Map{"error": "Initializing"})
 		}
 
-		srv, ok := state.Servers[cfg.Name]
-		if !ok {
+		idx, found := state.SearchByName(cfg.Name)
+		if !found {
 			return c.Status(404).JSON(fiber.Map{"error": "Server not found"})
 		}
 
-		pk, ok := state.Keys[srv.KeyID]
-		if !ok {
-			return c.Status(500).JSON(fiber.Map{"error": "Key missing"})
+		srv := state.AllServers[idx]
+
+		var peerPrefix []byte
+		if cfg.UseStation {
+			peerPrefix = state.PeerStation[idx]
+		} else {
+			peerPrefix = state.PeerHostname[idx]
 		}
 
 		c.Set("Cache-Control", "no-store")
 
-		configBytes := wg.Build(srv, pk, cfg)
+		configBytes := wg.Build(cfg.PrivateKey, cfg.DNS, peerPrefix, cfg.KeepAlive)
 
 		if outputType == "text" {
 			c.Set("Content-Type", "text/plain")
@@ -124,17 +131,17 @@ func GenerateConfig(outputType string) fiber.Handler {
 		}
 
 		if outputType == "file" {
-			c.Set("Content-Disposition", buildConfDisposition(srv.LowCode, srv.Number))
+			c.Set("Content-Disposition", buildConfDisposition(srv.GetLowCode(), srv.GetNumber()))
 			c.Set("Content-Type", "application/x-wireguard-config")
 			return c.Send(configBytes)
 		}
 
-		png, err := qr.GeneratePNG(configBytes)
+		svg, err := qr.GenerateSVG(configBytes)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "QR generation error"})
 		}
-		c.Set("Content-Type", "image/png")
-		return c.Send(png)
+		c.Set("Content-Type", "image/svg+xml; charset=utf-8")
+		return c.Send(svg)
 	}
 }
 
@@ -154,7 +161,7 @@ func GenerateBatch(c fiber.Ctx) error {
 		return c.Status(503).JSON(fiber.Map{"error": "Initializing"})
 	}
 
-	servers := store.Core.GetBatchFromState(state, body.Country, body.City)
+	servers, startIdx := store.Core.GetBatchFromState(state, body.Country, body.City)
 	if len(servers) == 0 {
 		return c.Status(404).JSON(fiber.Map{"error": "No servers found"})
 	}
@@ -169,16 +176,16 @@ func GenerateBatch(c fiber.Ctx) error {
 		zw := zip.NewWriter(w)
 		defer zw.Close()
 
-		usedPaths := make(map[string]int, len(servers))
-
-		for _, srv := range servers {
-			pk, ok := state.Keys[srv.KeyID]
-			if !ok {
-				continue
+		for i, srv := range servers {
+			idx := int(startIdx) + i
+			var peerPrefix []byte
+			if cfg.UseStation {
+				peerPrefix = state.PeerStation[idx]
+			} else {
+				peerPrefix = state.PeerHostname[idx]
 			}
 
 			path := buildBatchPath(body.Country, body.City, srv)
-			path = dedup(path, usedPaths)
 
 			f, err := zw.CreateHeader(&zip.FileHeader{
 				Name:   path,
@@ -188,7 +195,7 @@ func GenerateBatch(c fiber.Ctx) error {
 				continue
 			}
 
-			wg.WriteConfig(f, srv, pk, cfg)
+			wg.WriteConfig(f, cfg.PrivateKey, cfg.DNS, peerPrefix, cfg.KeepAlive)
 		}
 	})
 }
@@ -243,25 +250,34 @@ func ServeAsset(c fiber.Ctx, asset *types.Asset, cacheTier string) error {
 }
 
 func buildBatchPath(batchCountry, batchCity string, srv types.ProcessedServer) string {
+	srvCountry := srv.GetCountry()
+	srvCity := srv.GetCity()
+	srvFileName := srv.GetFileName()
+
+	if batchCity != "" {
+		suffix := srv.GetCityDedupSuffix()
+		if suffix != "" {
+			base := srvFileName[:len(srvFileName)-5]
+			srvFileName = base + suffix + ".conf"
+		}
+		return srvFileName
+	}
 	if batchCountry == "" {
-		size := len(srv.Country) + len(srv.City) + len(srv.FileName) + 2
+		size := len(srvCountry) + len(srvCity) + len(srvFileName) + 2
 		buf := make([]byte, 0, size)
-		buf = append(buf, srv.Country...)
+		buf = append(buf, srvCountry...)
 		buf = append(buf, '/')
-		buf = append(buf, srv.City...)
+		buf = append(buf, srvCity...)
 		buf = append(buf, '/')
-		buf = append(buf, srv.FileName...)
+		buf = append(buf, srvFileName...)
 		return string(buf)
 	}
-	if batchCity == "" {
-		size := len(srv.City) + len(srv.FileName) + 1
-		buf := make([]byte, 0, size)
-		buf = append(buf, srv.City...)
-		buf = append(buf, '/')
-		buf = append(buf, srv.FileName...)
-		return string(buf)
-	}
-	return srv.FileName
+	size := len(srvCity) + len(srvFileName) + 1
+	buf := make([]byte, 0, size)
+	buf = append(buf, srvCity...)
+	buf = append(buf, '/')
+	buf = append(buf, srvFileName...)
+	return string(buf)
 }
 
 func sanitizeFilename(s string) string {
@@ -312,36 +328,4 @@ func buildConfDisposition(code, num string) string {
 	buf = append(buf, num...)
 	buf = append(buf, `.conf"`...)
 	return string(buf)
-}
-
-func dedup(path string, usedPaths map[string]int) string {
-	val, exists := usedPaths[path]
-	if !exists {
-		usedPaths[path] = 0
-		return path
-	}
-
-	base := path[:len(path)-5]
-	idx := val
-	if idx == 0 {
-		idx = 1
-	}
-
-	baseBuf := make([]byte, 0, len(base)+12)
-	baseBuf = append(baseBuf, base...)
-	baseBuf = append(baseBuf, '_')
-	prefixLen := len(baseBuf)
-
-	for {
-		baseBuf = baseBuf[:prefixLen]
-		baseBuf = strconv.AppendInt(baseBuf, int64(idx), 10)
-		baseBuf = append(baseBuf, '.', 'c', 'o', 'n', 'f')
-		candidate := string(baseBuf)
-		idx++
-		if _, occupied := usedPaths[candidate]; !occupied {
-			usedPaths[path] = idx
-			usedPaths[candidate] = 0
-			return candidate
-		}
-	}
 }
