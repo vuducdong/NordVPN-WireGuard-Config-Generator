@@ -64,6 +64,27 @@ func IsIPv4(s string) bool {
 	return dots == 3 && hasNum && num <= 255
 }
 
+func normalizeName(s string) string {
+	b := make([]byte, 0, len(s))
+	lastUnderscore := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 32
+		}
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b = append(b, c)
+			lastUnderscore = false
+		} else {
+			if !lastUnderscore {
+				b = append(b, '_')
+				lastUnderscore = true
+			}
+		}
+	}
+	return string(b)
+}
+
 func ParseCommon(key, dns, endpoint string, keepAlive *int) (types.ValidatedConfig, []string) {
 	var errs []string
 	if key != "" && !IsKey(key) {
@@ -72,6 +93,7 @@ func ParseCommon(key, dns, endpoint string, keepAlive *int) (types.ValidatedConf
 
 	cleanDns := "103.86.96.100"
 	if dns != "" {
+		parts := make([]string, 0, 4)
 		valid := true
 		start := 0
 		for i := 0; i <= len(dns); i++ {
@@ -81,13 +103,14 @@ func ParseCommon(key, dns, endpoint string, keepAlive *int) (types.ValidatedConf
 					valid = false
 					break
 				}
+				parts = append(parts, part)
 				start = i + 1
 			}
 		}
 		if !valid {
 			errs = append(errs, "Invalid DNS IP")
 		} else {
-			cleanDns = dns
+			cleanDns = strings.Join(parts, ",")
 		}
 	}
 
@@ -115,17 +138,11 @@ func ParseCommon(key, dns, endpoint string, keepAlive *int) (types.ValidatedConf
 func ValidateConfig(b types.ConfigRequest) (types.ValidatedConfig, string) {
 	cfg, errs := ParseCommon(b.PrivateKey, b.DNS, b.Endpoint, b.KeepAlive)
 
-	if b.Country == "" {
-		errs = append(errs, "Missing country")
-	}
-	if b.City == "" {
-		errs = append(errs, "Missing city")
-	}
 	if b.Name == "" {
 		errs = append(errs, "Missing name")
 	}
 
-	cfg.Name = b.Name
+	cfg.Name = normalizeName(b.Name)
 	if len(errs) > 0 {
 		return types.ValidatedConfig{}, strings.Join(errs, ", ")
 	}

@@ -15,7 +15,7 @@ export function useUI() {
 
   const close = () => state.panel = false
   const open = m => { close(); Object.keys(state.modals).forEach(k => state.modals[k] = k === m) }
-  
+
   const cleanQR = () => { if (state.qrUrl) URL.revokeObjectURL(state.qrUrl) }
 
   return {
@@ -28,9 +28,11 @@ export function useUI() {
     cleanQR,
     showQR: async (s, fn) => {
       state.server = s
-      cleanQR()
+      const previousUrl = state.qrUrl
       try {
-        state.qrUrl = URL.createObjectURL(await fn())
+        const nextUrl = URL.createObjectURL(await fn())
+        if (previousUrl) URL.revokeObjectURL(previousUrl)
+        state.qrUrl = nextUrl
         open('qr')
       } catch (e) {
         state.modals.qr = false

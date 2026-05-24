@@ -59,7 +59,7 @@ Generates a WireGuard configuration based on the selected server and user creden
 **Endpoints:**
 - `POST /api/config` - Returns configuration as plain text.
 - `POST /api/config/download` - Returns configuration as a downloadable `.conf` file.
-- `POST /api/config/qr` - Returns configuration as a PNG QR code image.
+- `POST /api/config/qr` - Returns configuration as an SVG QR code image.
 
 **Request Body:**
 ```json
@@ -84,7 +84,7 @@ Generates a WireGuard configuration based on the selected server and user creden
 **Response Headers:**
 - **Text**: `Content-Type: text/plain`
 - **File**: `Content-Type: application/x-wireguard-config`, `Content-Disposition: attachment; filename="[srv_code][srv_num].conf"`
-- **QR**: `Content-Type: image/png`
+- **QR**: `Content-Type: image/svg+xml`
 
 ### 4. Generate Batch Configurations
 

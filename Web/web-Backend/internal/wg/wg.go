@@ -44,7 +44,7 @@ func Build(privateKey, dns string, peerPrefix []byte, keepAlive int) []byte {
 	return buf
 }
 
-func WriteConfig(w io.Writer, privateKey, dns string, peerPrefix []byte, keepAlive int) {
+func WriteConfig(w io.Writer, privateKey, dns string, peerPrefix []byte, keepAlive int) error {
 	bufPtr := pool.Get().(*[]byte)
 	buf := *bufPtr
 	buf = buf[:0]
@@ -54,7 +54,8 @@ func WriteConfig(w io.Writer, privateKey, dns string, peerPrefix []byte, keepAli
 	buf = append(buf, dns...)
 	buf = append(buf, peerPrefix...)
 	buf = strconv.AppendInt(buf, int64(keepAlive), 10)
-	w.Write(buf)
+	_, err := w.Write(buf)
 	*bufPtr = buf
 	pool.Put(bufPtr)
+	return err
 }

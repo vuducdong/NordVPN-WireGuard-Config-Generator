@@ -85,7 +85,7 @@ type ServerPayload struct {
 	List    map[string]map[string][][]interface{} `json:"l"`
 }
 
-func getString(b []byte) string {
+func BytesToString(b []byte) string {
 	for i := 0; i < len(b); i++ {
 		if b[i] == 0 {
 			if i == 0 {
@@ -101,41 +101,41 @@ func getString(b []byte) string {
 }
 
 func (p *ProcessedServer) GetName() string {
-	return getString(p.Name[:])
+	return BytesToString(p.Name[:])
 }
 
 func (p *ProcessedServer) GetStation() string {
-	return getString(p.Station[:])
+	return BytesToString(p.Station[:])
 }
 
 func (p *ProcessedServer) GetHostname() string {
-	return getString(p.Hostname[:])
+	return BytesToString(p.Hostname[:])
 }
 
 func (p *ProcessedServer) GetCountry() string {
-	return getString(p.Country[:])
+	return BytesToString(p.Country[:])
 }
 
 func (p *ProcessedServer) GetCity() string {
-	return getString(p.City[:])
+	return BytesToString(p.City[:])
 }
 
 func (p *ProcessedServer) GetCode() string {
-	return getString(p.Code[:])
+	return BytesToString(p.Code[:])
 }
 
 func (p *ProcessedServer) GetLowCode() string {
-	return getString(p.LowCode[:])
+	return BytesToString(p.LowCode[:])
 }
 
 func (p *ProcessedServer) GetNumber() string {
-	return getString(p.Number[:])
+	return BytesToString(p.Number[:])
 }
 
 func (p *ProcessedServer) GetFileName() string {
-	return getString(p.FileName[:])
+	return BytesToString(p.FileName[:])
 }
 
 func (p *ProcessedServer) GetCityDedupSuffix() string {
-	return getString(p.CityDedupSuffix[:])
+	return BytesToString(p.CityDedupSuffix[:])
 }

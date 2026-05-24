@@ -1,6 +1,6 @@
 const BASE = import.meta.env.VITE_API_BASE || '/api'
 const TIMEOUT = 60000
-const MIME = { json: 'application/json', wg: 'application/x-wireguard-config', img: 'image/', zip: 'application/zip', bin: 'application/octet-stream' }
+const MIME = { json: 'application/json', wg: 'application/x-wireguard-config', img: 'image/*', zip: 'application/zip', bin: 'application/octet-stream' }
 
 async function req(end, opt = {}) {
   const c = new AbortController()
@@ -24,7 +24,7 @@ async function req(end, opt = {}) {
     }
 
     const t = r.headers.get('content-type') || ''
-    if (t.includes(MIME.wg) || t.startsWith(MIME.img) || t.includes(MIME.zip) || t.includes(MIME.bin)) return r
+    if (t.includes(MIME.wg) || t.startsWith('image/') || t.includes(MIME.zip) || t.includes(MIME.bin)) return r
     return t.includes(MIME.json) ? r.json() : r.text()
   } catch (e) {
     throw e.name === 'AbortError' ? new Error('Request timeout') : e
@@ -61,7 +61,7 @@ export const api = {
     const r = await req('/config/qr', {
       method: 'POST',
       body: JSON.stringify(data),
-      headers: { 'Accept': MIME.img }
+      headers: { 'Accept': 'image/*' }
     })
     return r.blob()
   }

@@ -13,8 +13,7 @@ const (
 )
 
 type RateBucket struct {
-	IPHash uint64
-	State  uint64
+	entry uint64
 }
 
 type AtomicLimiter struct {
@@ -22,81 +21,78 @@ type AtomicLimiter struct {
 }
 
 func hashIP(ip string) uint64 {
-	var hash uint64 = 14695981039346656037
+	var h uint64 = 14695981039346656037
 	for i := 0; i < len(ip); i++ {
-		hash ^= uint64(ip[i])
-		hash *= 1099511628211
+		h ^= uint64(ip[i])
+		h *= 1099511628211
 	}
-	return hash
+	return h
 }
 
-func (l *AtomicLimiter) Allow(ip string, limit int, window int64) bool {
-	hash := hashIP(ip)
-	now := time.Now().Unix()
-	baseSlot := int(hash & (ArraySize - 1))
+func identityKey(h uint64) uint32 {
+	k := uint32(h >> 32)
+	if k == 0 {
+		k = 1
+	}
+	return k
+}
 
-	for i := 0; i < MaxProbes; i++ {
-		slot := (baseSlot + i) & (ArraySize - 1)
+func packBucket(id uint32, exp16 uint16, count uint16) uint64 {
+	return uint64(id)<<32 | uint64(exp16)<<16 | uint64(count)
+}
+
+func isExpired(exp16 uint16, nowSec int64) bool {
+	return uint16(nowSec)-exp16 < 32768
+}
+
+func (l *AtomicLimiter) Allow(ip string, limit int, windowSec int64) bool {
+	h := hashIP(ip)
+	id := identityKey(h)
+	baseSlot := int(h & (ArraySize - 1))
+	now := time.Now().Unix()
+	newExp := uint16(now + windowSec)
+
+	for probe := 0; probe < MaxProbes; probe++ {
+		slot := (baseSlot + probe) & (ArraySize - 1)
 		b := &l.Buckets[slot]
 
-		currentIP := atomic.LoadUint64(&b.IPHash)
-		if currentIP == 0 {
-			if atomic.CompareAndSwapUint64(&b.IPHash, 0, hash) {
-				expiry := now + window
-				state := (uint64(expiry) << 16) | 1
-				atomic.StoreUint64(&b.State, state)
-				return true
-			}
-			currentIP = atomic.LoadUint64(&b.IPHash)
-		}
+		for {
+			cur := atomic.LoadUint64(&b.entry)
+			curID := uint32(cur >> 32)
+			exp16 := uint16(cur >> 16)
+			count := uint16(cur)
 
-		if currentIP != hash {
-			state := atomic.LoadUint64(&b.State)
-			expiry := int64(state >> 16)
-			if now > expiry {
-				if atomic.CompareAndSwapUint64(&b.IPHash, currentIP, hash) {
-					expiry := now + window
-					state := (uint64(expiry) << 16) | 1
-					atomic.StoreUint64(&b.State, state)
+			if curID == 0 || (curID != id && isExpired(exp16, now)) {
+				next := packBucket(id, newExp, 1)
+				if atomic.CompareAndSwapUint64(&b.entry, cur, next) {
 					return true
 				}
-			}
-			continue
-		}
-
-		for {
-			state := atomic.LoadUint64(&b.State)
-			expiry := int64(state >> 16)
-			count := uint16(state)
-
-			var nextState uint64
-			if now > expiry {
-				nextExpiry := now + window
-				nextState = (uint64(nextExpiry) << 16) | 1
-			} else {
-				if count == 65535 {
-					return false
-				}
-				nextState = (uint64(expiry) << 16) | uint64(count+1)
+				continue
 			}
 
-			if atomic.CompareAndSwapUint64(&b.State, state, nextState) {
-				if now <= expiry && count >= uint16(limit) {
-					return false
+			if curID != id {
+				break
+			}
+
+			if isExpired(exp16, now) {
+				next := packBucket(id, newExp, 1)
+				if atomic.CompareAndSwapUint64(&b.entry, cur, next) {
+					return true
 				}
+				continue
+			}
+
+			if count >= uint16(limit) {
+				return false
+			}
+			if count == 65535 {
+				return false
+			}
+			next := packBucket(id, exp16, count+1)
+			if atomic.CompareAndSwapUint64(&b.entry, cur, next) {
 				return true
 			}
 		}
-	}
-
-	slot := baseSlot
-	b := &l.Buckets[slot]
-	currentIP := atomic.LoadUint64(&b.IPHash)
-	if atomic.CompareAndSwapUint64(&b.IPHash, currentIP, hash) {
-		expiry := now + window
-		state := (uint64(expiry) << 16) | 1
-		atomic.StoreUint64(&b.State, state)
-		return true
 	}
 
 	return true
@@ -104,13 +100,15 @@ func (l *AtomicLimiter) Allow(ip string, limit int, window int64) bool {
 
 func NewLimiter(limit int, window time.Duration, errMsg string) fiber.Handler {
 	l := &AtomicLimiter{}
-	windowSeconds := int64(window.Seconds())
-	if windowSeconds <= 0 {
-		windowSeconds = 1
+	windowSec := int64(window.Seconds())
+	if windowSec <= 0 {
+		windowSec = 1
+	}
+	if windowSec > 32767 {
+		windowSec = 32767
 	}
 	return func(c fiber.Ctx) error {
-		ip := c.IP()
-		if !l.Allow(ip, limit, windowSeconds) {
+		if !l.Allow(c.IP(), limit, windowSec) {
 			return c.Status(429).JSON(fiber.Map{"error": errMsg})
 		}
 		return c.Next()

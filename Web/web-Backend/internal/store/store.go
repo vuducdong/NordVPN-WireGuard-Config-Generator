@@ -209,8 +209,8 @@ func (s *Store) updateServers() {
 		}
 	}
 	sort.Slice(nameIndex, func(i, j int) bool {
-		ni := getString(nameIndex[i].Name[:])
-		nj := getString(nameIndex[j].Name[:])
+		ni := types.BytesToString(nameIndex[i].Name[:])
+		nj := types.BytesToString(nameIndex[j].Name[:])
 		return ni < nj
 	})
 	state.NameIndex = nameIndex
@@ -381,7 +381,7 @@ func (s *State) SearchByName(name string) (int, bool) {
 	low, high := 0, len(s.NameIndex)-1
 	for low <= high {
 		mid := (low + high) >> 1
-		midName := getString(s.NameIndex[mid].Name[:])
+		midName := types.BytesToString(s.NameIndex[mid].Name[:])
 		if midName < name {
 			low = mid + 1
 		} else if midName > name {
@@ -538,21 +538,6 @@ func validateVersion(v string) bool {
 	return min >= 1
 }
 
-func getString(b []byte) string {
-	for i := 0; i < len(b); i++ {
-		if b[i] == 0 {
-			if i == 0 {
-				return ""
-			}
-			return unsafe.String(&b[0], i)
-		}
-	}
-	if len(b) == 0 {
-		return ""
-	}
-	return unsafe.String(&b[0], len(b))
-}
-
 func getBytes(b []byte) []byte {
 	for i := 0; i < len(b); i++ {
 		if b[i] == 0 {
@@ -586,4 +571,19 @@ func computeRegionHash(country, city string) uint64 {
 		hash *= 1099511628211
 	}
 	return hash
+}
+
+func getString(b []byte) string {
+	for i := 0; i < len(b); i++ {
+		if b[i] == 0 {
+			if i == 0 {
+				return ""
+			}
+			return unsafe.String(&b[0], i)
+		}
+	}
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(&b[0], len(b))
 }

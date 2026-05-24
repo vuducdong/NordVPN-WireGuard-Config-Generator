@@ -195,7 +195,9 @@ func GenerateBatch(c fiber.Ctx) error {
 				continue
 			}
 
-			wg.WriteConfig(f, cfg.PrivateKey, cfg.DNS, peerPrefix, cfg.KeepAlive)
+			if err := wg.WriteConfig(f, cfg.PrivateKey, cfg.DNS, peerPrefix, cfg.KeepAlive); err != nil {
+				continue
+			}
 		}
 	})
 }
