@@ -23,7 +23,22 @@ export async function onRequest(context) {
 
   try {
     const backendResponse = await fetch(backendUrl, options);
-    const responseHeaders = new Headers(backendResponse.headers);
+    const responseHeaders = new Headers();
+    const allowedHeaders = new Set([
+      'content-type',
+      'content-disposition',
+      'cache-control',
+      'etag',
+      'content-encoding',
+      'vary',
+      'content-length'
+    ]);
+
+    for (const [key, value] of backendResponse.headers.entries()) {
+      if (allowedHeaders.has(key.toLowerCase())) {
+        responseHeaders.set(key, value);
+      }
+    }
 
     const nullBodyStatuses = [101, 204, 205, 304];
     const useNullBody = nullBodyStatuses.includes(backendResponse.status);
