@@ -6,6 +6,11 @@ export async function onRequest(context) {
   const headers = new Headers(request.headers);
   headers.delete('host');
 
+  const clientIP = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || request.headers.get('x-forwarded-for');
+  if (clientIP) {
+    headers.set('X-Client-IP', clientIP.split(',')[0].trim());
+  }
+
   const options = {
     method: request.method,
     headers,
