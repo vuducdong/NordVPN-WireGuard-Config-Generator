@@ -1,6 +1,6 @@
 import { rateLimiter } from "hono-rate-limiter";
 import type { MiddlewareHandler } from "hono";
-import { RATE_LIMIT_CONFIG, RATE_LIMIT_BATCH, RATE_LIMIT_WINDOW_MS } from "../constants";
+import { RATE_LIMIT_CONFIG, RATE_LIMIT_WINDOW_MS } from "../constants";
 
 function extractClientIP(c: { req: { header(name: string): string | undefined } }): string {
   return c.req.header("x-client-ip") ??
@@ -26,30 +26,9 @@ function getConfigLimiter(): MiddlewareHandler {
   return configLimiterInstance;
 }
 
-let batchLimiterInstance: MiddlewareHandler | null = null;
-
-function getBatchLimiter(): MiddlewareHandler {
-  if (!batchLimiterInstance) {
-    batchLimiterInstance = rateLimiter({
-      windowMs: RATE_LIMIT_WINDOW_MS,
-      limit: RATE_LIMIT_BATCH,
-      keyGenerator: extractClientIP,
-      message: rateLimitReachedMessage,
-    });
-  }
-  return batchLimiterInstance;
-}
-
 export function configRateLimit(): MiddlewareHandler {
   return async (c, next) => {
     const limiter = getConfigLimiter();
-    return limiter(c, next);
-  };
-}
-
-export function batchRateLimit(): MiddlewareHandler {
-  return async (c, next) => {
-    const limiter = getBatchLimiter();
     return limiter(c, next);
   };
 }

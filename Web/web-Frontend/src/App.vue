@@ -71,17 +71,21 @@ const applyCfg = c => {
   }
 }
 
-const dl = async s => {
-  try { await cfg.dl(s); notif.show('Downloaded', 'success') }
-  catch (e) { notif.show(e.message || 'Download failed', 'error') }
+const dl = s => {
+  try {
+    cfg.dl(s)
+    notif.show('Downloaded', 'success')
+  } catch (e) {
+    notif.show(e.message || 'Download failed', 'error')
+  }
 }
 
-const dlBatch = async () => {
+const dlBatch = () => {
   if (dlLoading.value) return
   dlLoading.value = true
   notif.show('Compressing...', 'success')
   try {
-    await cfg.dlBatch({ country: srv.fCountry.value, city: srv.fCity.value })
+    cfg.dlBatch(srv.filtered, { country: srv.fCountry.value, city: srv.fCity.value })
     notif.show('Download started', 'success')
   } catch (e) {
     notif.show(e.message || 'Batch download failed', 'error')
@@ -91,26 +95,36 @@ const dlBatch = async () => {
 }
 
 const cp = async s => {
-  try { await cfg.copy(s); notif.show('Copied', 'success') }
-  catch (e) { notif.show(e.message || 'Copy failed', 'error') }
+  try {
+    await cfg.copy(s)
+    notif.show('Copied', 'success')
+  } catch (e) {
+    notif.show(e.message || 'Copy failed', 'error')
+  }
 }
 
 const qr = s => {
-  ui.showQR(s, async () => {
-    if (cfg.privKey.value) {
-      const templatePayload = await api.genConfig({ ...cfg.make(s), mode: "client" })
-      const finalConfig = templatePayload.template.replace("__CLIENT_PK__", cfg.privKey.value)
-      const code = generate(finalConfig)
-      const svgText = toSvgSource(code, {
-        on: "#000000",
-        off: "#ffffff",
-        pad: 1,
-        width: 256,
-      })
-      return new Blob([svgText], { type: "image/svg+xml" })
-    } else {
-      return api.genQR({ ...cfg.make(s), mode: "server" })
-    }
+  ui.showQR(s, () => {
+    const endpoint = cfg.settings.value.endpoint === 'station' ? s.ip : s.endpoint
+    const finalConfig = `[Interface]
+PrivateKey=${cfg.privKey.value || ""}
+Address=10.5.0.2/16
+DNS=${cfg.settings.value.dns}
+
+[Peer]
+PublicKey=${s.publicKey}
+AllowedIPs=0.0.0.0/0,::/0
+Endpoint=${endpoint}:51820
+PersistentKeepalive=${cfg.settings.value.keepalive}`
+
+    const code = generate(finalConfig)
+    const svgText = toSvgSource(code, {
+      on: "#000000",
+      off: "#ffffff",
+      pad: 1,
+      width: 256,
+    })
+    return new Blob([svgText], { type: "image/svg+xml" })
   }).catch(e => notif.show(e.message || 'QR generation failed', 'error'))
 }
 
@@ -134,7 +148,6 @@ onMounted(async () => {
 
 watch([srv.fCountry, srv.fCity], observe)
 </script>
-
 
 <template>
   <Toast v-if="notif.toast.value" :msg="notif.toast.value.message" :type="notif.toast.value.type" @close="notif.toast.value = null" />

@@ -1,14 +1,17 @@
 const BASE = import.meta.env.VITE_API_BASE || '/api'
 const TIMEOUT = 60000
-const MIME = { json: 'application/json', wg: 'application/x-wireguard-config', bin: 'application/octet-stream' }
 
 async function req(end, opt = {}) {
   const c = new AbortController()
   const id = setTimeout(() => c.abort(), TIMEOUT)
   try {
+    const isGet = !opt.method || opt.method.toUpperCase() === 'GET'
+    const headers = { ...opt.headers }
+    if (!isGet) headers['Content-Type'] = 'application/json'
+
     const r = await fetch(`${BASE}${end}`, {
       ...opt,
-      headers: { 'Content-Type': MIME.json, ...opt.headers },
+      headers,
       signal: c.signal
     })
 
@@ -23,9 +26,8 @@ async function req(end, opt = {}) {
       throw e
     }
 
-    const t = r.headers.get('content-type') || ''
-    if (t.includes(MIME.wg) || t.startsWith('image/') || t.includes('application/zip') || t.includes(MIME.bin)) return r
-    return t.includes(MIME.json) ? r.json() : r.text()
+    const t = (r.headers.get('content-type') || '').toLowerCase()
+    return t.includes('application/json') ? r.json() : r.text()
   } catch (e) {
     throw e.name === 'AbortError' ? new Error('Request timeout') : e
   } finally {
@@ -35,36 +37,5 @@ async function req(end, opt = {}) {
 
 export const api = {
   getServers: () => req('/servers'),
-  genKey: token => req('/key', { method: 'POST', body: JSON.stringify({ token }) }),
-  genConfig: data => req('/config', { method: 'POST', body: JSON.stringify(data) }),
-  dlConfig: async data => {
-    const r = await req('/config/download', {
-      method: 'POST',
-      body: JSON.stringify(data),
-      headers: { 'Accept': MIME.wg }
-    })
-    const m = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')
-    return { blob: await r.blob(), name: m?.[1] || null }
-  },
-  dlBatch: async data => {
-    const isClient = data.mode === 'client'
-    const r = await req('/config/batch', {
-      method: 'POST',
-      body: JSON.stringify(data),
-      headers: { 'Accept': isClient ? MIME.json : MIME.bin }
-    })
-    if (isClient) return r
-    const m = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')
-    let name = m?.[1] || 'NordVPN_Configs.zip'
-    if (name.endsWith('.nord')) name = name.replace('.nord', '.zip')
-    return { blob: await r.blob(), name }
-  },
-  genQR: async data => {
-    const r = await req('/config/qr', {
-      method: 'POST',
-      body: JSON.stringify(data),
-      headers: { 'Accept': 'image/*' }
-    })
-    return r.blob()
-  }
+  genKey: token => req('/key', { method: 'POST', body: JSON.stringify({ token }) })
 }

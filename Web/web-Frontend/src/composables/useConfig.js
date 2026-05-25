@@ -1,11 +1,33 @@
 import { ref } from 'vue'
-import { api } from '@/services/apiService'
 import { storage } from '@/services/storageService'
 import { Validators } from '@/utils/utils'
 import { createZipArchive } from '@/utils/zip'
 
 const KEY = 'wg_gen_settings'
 const DEF = { dns: '103.86.96.100', endpoint: 'hostname', keepalive: 25 }
+
+function buildWireGuardConfig(privateKey, dns, publicKey, endpoint, keepalive) {
+  return `[Interface]
+PrivateKey=${privateKey || ""}
+Address=10.5.0.2/16
+DNS=${dns}
+
+[Peer]
+PublicKey=${publicKey}
+AllowedIPs=0.0.0.0/0,::/0
+Endpoint=${endpoint}:51820
+PersistentKeepalive=${keepalive}`;
+}
+
+function buildBatchFilePath(batchCountry, batchCity, s) {
+  if (batchCity !== "") {
+    return s.fileName
+  }
+  if (batchCountry === "") {
+    return `${s.country}/${s.city}/${s.fileName}`
+  }
+  return `${s.city}/${s.fileName}`
+}
 
 export function useConfig() {
   const privKey = ref('')
@@ -35,13 +57,6 @@ export function useConfig() {
     }
   }
 
-  const make = s => ({
-    name: s.name,
-    dns: settings.value.dns,
-    endpoint: settings.value.endpoint,
-    keepalive: settings.value.keepalive
-  })
-
   const saveBlob = (blob, name) => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -51,47 +66,65 @@ export function useConfig() {
     URL.revokeObjectURL(url)
   }
 
-  const dl = async s => {
-    if (privKey.value) {
-      const payload = { ...make(s), mode: "client" }
-      const { filename, template } = await api.genConfig(payload)
-      const finalConfig = template.replace("__CLIENT_PK__", privKey.value)
-      const blob = new Blob([finalConfig], { type: 'application/x-wireguard-config' })
-      saveBlob(blob, filename)
-    } else {
-      const payload = { ...make(s), mode: "server" }
-      const { blob, name } = await api.dlConfig(payload)
-      saveBlob(blob, name || `${s.name}.conf`)
-    }
+  const dl = s => {
+    const endpoint = settings.value.endpoint === 'station' ? s.ip : s.endpoint
+    const configText = buildWireGuardConfig(
+      privKey.value,
+      settings.value.dns,
+      s.publicKey,
+      endpoint,
+      settings.value.keepalive
+    )
+    const blob = new Blob([configText], { type: 'application/x-wireguard-config' })
+    saveBlob(blob, s.fileName)
   }
 
-  const dlBatch = async (filters = {}) => {
-    const payload = {
-      dns: settings.value.dns,
-      endpoint: settings.value.endpoint,
-      keepalive: settings.value.keepalive,
-      country: filters.country || '',
-      city: filters.city || ''
+  const dlBatch = (servers, filters = {}) => {
+    const targetCountry = filters.country || ''
+    const targetCity = filters.city || ''
+
+    const list = servers.value
+    if (!list || list.length === 0) throw new Error("No configurations found")
+
+    let archiveName = "NordVPN_All"
+    if (targetCountry !== "") {
+      archiveName = `NordVPN_${targetCountry.replace(/[^a-zA-Z0-9-_]/g, "_")}`
+      if (targetCity !== "") {
+        archiveName += `_${targetCity.replace(/[^a-zA-Z0-9-_]/g, "_")}`
+      }
     }
 
-    if (privKey.value) {
-      payload.mode = "client"
-      const { archiveName, templates } = await api.dlBatch(payload)
-      const entries = templates.map(t => {
-        const finalConfig = t.template.replace("__CLIENT_PK__", privKey.value)
-        return {
-          name: t.name,
-          data: new TextEncoder().encode(finalConfig)
-        }
-      })
-      const zipData = createZipArchive(entries)
-      const blob = new Blob([zipData], { type: 'application/zip' })
-      saveBlob(blob, `${archiveName}.zip`)
-    } else {
-      payload.mode = "server"
-      const { blob, name } = await api.dlBatch(payload)
-      saveBlob(blob, name)
-    }
+    const entries = list.map(s => {
+      const endpoint = settings.value.endpoint === 'station' ? s.ip : s.endpoint
+      const configText = buildWireGuardConfig(
+        privKey.value,
+        settings.value.dns,
+        s.publicKey,
+        endpoint,
+        settings.value.keepalive
+      )
+      const zipPath = buildBatchFilePath(targetCountry, targetCity, s)
+      return {
+        name: zipPath,
+        data: new TextEncoder().encode(configText)
+      }
+    })
+    
+    const zipData = createZipArchive(entries)
+    const blob = new Blob([zipData], { type: 'application/zip' })
+    saveBlob(blob, `${archiveName}.zip`)
+  }
+
+  const copy = s => {
+    const endpoint = settings.value.endpoint === 'station' ? s.ip : s.endpoint
+    const configText = buildWireGuardConfig(
+      privKey.value,
+      settings.value.dns,
+      s.publicKey,
+      endpoint,
+      settings.value.keepalive
+    )
+    return navigator.clipboard.writeText(configText)
   }
 
   return {
@@ -103,17 +136,6 @@ export function useConfig() {
     setKey: k => { if (Validators.Key.valid(k)) privKey.value = k; else throw new Error(Validators.Key.err) },
     dl,
     dlBatch,
-    copy: async s => {
-      if (privKey.value) {
-        const payload = { ...make(s), mode: "client" }
-        const { template } = await api.genConfig(payload)
-        const finalConfig = template.replace("__CLIENT_PK__", privKey.value)
-        return navigator.clipboard.writeText(finalConfig)
-      } else {
-        const { template } = await api.genConfig({ ...make(s), mode: "server" })
-        return navigator.clipboard.writeText(template)
-      }
-    },
-    make
+    copy
   }
 }

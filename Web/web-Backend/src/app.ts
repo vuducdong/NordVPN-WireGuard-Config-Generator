@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serversRoute } from "./routes/servers";
 import { keyRoute } from "./routes/key";
-import { configRoute } from "./routes/config";
-import { batchRoute } from "./routes/batch";
 import { syncRoute } from "./routes/sync";
 
 function createApp() {
@@ -18,8 +16,6 @@ function createApp() {
 
   app.route("/api/servers", serversRoute);
   app.route("/api/key", keyRoute);
-  app.route("/api/config", configRoute);
-  app.route("/api/config/batch", batchRoute);
   app.route("/api/sync", syncRoute);
 
   app.get("/", (c) => c.text("NordGen API Active", 200));

@@ -1,21 +1,15 @@
 import {
-  KV_DATABASE_KEY,
-  KV_SERVERS_JSON_KEY,
+  KV_INJECTION_KEY,
   KV_VERSION_KEY,
   NORDVPN_SERVERS_URL,
 } from "../constants";
 import { normalizeName, sanitizeIdentifier, extractNumber } from "../lib/naming";
 import { validateVersion } from "../lib/version";
-import type { CompactDatabase, ServerEntry } from "../types";
+import { clearMemoryCache } from "../routes/servers";
 
-let databaseCache: CompactDatabase | null = null;
-
-export async function loadDatabase(env: Env): Promise<CompactDatabase | null> {
-  if (databaseCache) return databaseCache;
-  const raw = await env.NORDGEN_KV.get(KV_DATABASE_KEY);
-  if (!raw) return null;
-  databaseCache = JSON.parse(raw) as CompactDatabase;
-  return databaseCache;
+function ipToNumeric(ip: string): number {
+  const parts = ip.split(".").map(Number);
+  return ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
 }
 
 export async function refreshServerDatabase(env: Env): Promise<void> {
@@ -42,17 +36,15 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
     city: string;
     lowCode: string;
     number: string;
-    fileName: string;
     keyIndex: number;
     load: number;
     rawCountryName: string;
     rawCityName: string;
-    rawServerName: string;
     dedupSuffix: string;
   }> = [];
 
   const uniqueKeys: string[] = [];
-  const keyIndexMap = new Map<string, number>();
+  const keyMap = new Map<string, number>();
 
   for (const raw of rawServers) {
     const server = raw as unknown as RawServer;
@@ -88,20 +80,18 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
     const location = server.locations[0];
     if (!location.country || !location.country.code || !publicKey) continue;
 
-    let keyIdx = keyIndexMap.get(publicKey);
+    let keyIdx = keyMap.get(publicKey);
     if (keyIdx === undefined) {
       keyIdx = uniqueKeys.length;
       uniqueKeys.push(publicKey);
-      keyIndexMap.set(publicKey, keyIdx);
+      keyMap.set(publicKey, keyIdx);
     }
 
     const countryName = normalizeName(location.country.name);
     const cityName = normalizeName(location.country.city.name);
     const lowCountryCode = location.country.code.toLowerCase();
-
     const serverName = normalizeName(server.name);
     const serverNumber = extractNumber(server.name) || "wg";
-    const baseFileName = `${lowCountryCode}${serverNumber}.conf`;
 
     processedServers.push({
       name: serverName,
@@ -111,12 +101,10 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
       city: cityName,
       lowCode: lowCountryCode,
       number: serverNumber,
-      fileName: baseFileName,
       keyIndex: keyIdx,
       load: server.load,
       rawCountryName: location.country.name,
       rawCityName: location.country.city.name,
-      rawServerName: server.name,
       dedupSuffix: "",
     });
   }
@@ -142,7 +130,7 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
     const nameCounts = new Map<string, number>();
     for (let i = cityStart; i < cityEnd; i++) {
       const srv = processedServers[i];
-      const baseName = srv.fileName.slice(0, -5);
+      const baseName = `${srv.lowCode}${srv.number}`;
       const count = nameCounts.get(baseName) || 0;
       nameCounts.set(baseName, count + 1);
       srv.dedupSuffix = count > 0 ? `_${count}` : "";
@@ -150,61 +138,64 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
     cityStart = cityEnd;
   }
 
-  const payloadByCountry: Record<string, Record<string, Array<[string, number, string]>>> = {};
+  const l: Array<[string, string, Array<[string, Array<Array<number | string>>]>]> = [];
+  
+  let currentCountry = "";
+  let currentCountryArr: [string, string, Array<[string, Array<Array<number | string>>]>] | null = null;
+  let currentCity = "";
+  let currentCityArr: [string, Array<Array<number | string>>] | null = null;
+
   for (const srv of processedServers) {
     const countryKey = sanitizeIdentifier(srv.rawCountryName);
     const cityKey = sanitizeIdentifier(srv.rawCityName);
 
-    if (!payloadByCountry[countryKey]) {
-      payloadByCountry[countryKey] = {};
+    if (!currentCountryArr || currentCountry !== countryKey) {
+      currentCountry = countryKey;
+      currentCountryArr = [countryKey, srv.lowCode, []];
+      l.push(currentCountryArr);
+      currentCity = "";
     }
-    if (!payloadByCountry[countryKey][cityKey]) {
-      payloadByCountry[countryKey][cityKey] = [];
+
+    if (!currentCityArr || currentCity !== cityKey) {
+      currentCity = cityKey;
+      currentCityArr = [cityKey, []];
+      currentCountryArr[2].push(currentCityArr);
     }
-    payloadByCountry[countryKey][cityKey].push([sanitizeIdentifier(srv.rawServerName), srv.load, srv.station]);
+
+    const ipNum = ipToNumeric(srv.station);
+    const prefix = srv.lowCode === "gb" ? "uk" : srv.lowCode;
+    const expectedHostname = `${prefix}${srv.number}.nordvpn.com`;
+    const hName = srv.hostname === expectedHostname ? "" : srv.hostname;
+    const serverNum = isNaN(Number(srv.number)) ? srv.number : Number(srv.number);
+
+    const tuple: Array<number | string> = [serverNum, srv.load, ipNum, srv.keyIndex];
+
+    if (srv.dedupSuffix !== "") {
+      tuple.push(hName, srv.dedupSuffix);
+    } else if (hName !== "") {
+      tuple.push(hName);
+    }
+
+    currentCityArr[1].push(tuple);
   }
-
-  const compactServers: Record<string, ServerEntry> = {};
-  const regions: Record<string, string[]> = {};
-
-  for (const srv of processedServers) {
-    compactServers[srv.name] = {
-      station: srv.station,
-      hostname: srv.hostname,
-      country: srv.country,
-      city: srv.city,
-      lowCode: srv.lowCode,
-      number: srv.number,
-      keyIndex: srv.keyIndex,
-      dedupSuffix: srv.dedupSuffix,
-    };
-
-    const countryRegionKey = srv.country;
-    const cityRegionKey = `${srv.country}/${srv.city}`;
-
-    if (!regions[countryRegionKey]) regions[countryRegionKey] = [];
-    regions[countryRegionKey].push(srv.name);
-
-    if (!regions[cityRegionKey]) regions[cityRegionKey] = [];
-    regions[cityRegionKey].push(srv.name);
-  }
-
-  const database: CompactDatabase = {
-    keys: uniqueKeys,
-    servers: compactServers,
-    regions,
-  };
 
   const apiResponse = {
-    h: ["name", "load", "station"],
-    l: payloadByCountry,
+    k: uniqueKeys,
+    l
   };
 
+  const apiResponseJson = JSON.stringify(apiResponse);
+  const safeServersJson = apiResponseJson.replace(/</g, "\\u003c");
+  const injectionScript = `<script>window.__SERVER_LIST__=${safeServersJson};</script>`;
   const version = Date.now().toString(16);
 
-  await env.NORDGEN_KV.put(KV_DATABASE_KEY, JSON.stringify(database));
-  await env.NORDGEN_KV.put(KV_SERVERS_JSON_KEY, JSON.stringify(apiResponse));
-  await env.NORDGEN_KV.put(KV_VERSION_KEY, version);
+  await Promise.all([
+    env.NORDGEN_KV.put("global:api_response", apiResponseJson, {
+      metadata: { version }
+    }),
+    env.NORDGEN_KV.put(KV_INJECTION_KEY, injectionScript),
+    env.NORDGEN_KV.put(KV_VERSION_KEY, version)
+  ]);
 
-  databaseCache = database;
+  clearMemoryCache();
 }

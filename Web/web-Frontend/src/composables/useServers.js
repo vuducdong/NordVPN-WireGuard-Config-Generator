@@ -54,12 +54,9 @@ export function useServers() {
 
   watch([fCity, sortKey, sortOrd], reset)
 
-  const processServerData = (h, l) => {
-    const idx = Object.fromEntries(h.map((k, i) => [k, i]))
-    if (!['name', 'load', 'station'].every(k => k in idx)) throw new Error('Invalid data')
-
+  const processServerData = (k, l) => {
     const list = []
-    const cSet = new Set()
+    const cList = []
     const cMap = {}
     const fmtCache = new Map()
 
@@ -70,33 +67,65 @@ export function useServers() {
       return v
     }
 
-    for (const [cn, cities] of Object.entries(l)) {
-      cSet.add(cn)
-      const cityList = []
-      const dCountry = getFmt(cn)
+    for (const countryData of l) {
+      const cn = countryData[0]
+      const lowCode = countryData[1]
+      const cities = countryData[2]
 
-      for (const [ci, servers] of Object.entries(cities)) {
-        cityList.push(ci)
+      const dCountry = getFmt(cn)
+      cList.push({ id: cn, name: dCountry })
+
+      const cityList = []
+
+      for (const cityData of cities) {
+        const ci = cityData[0]
+        const servers = cityData[1]
+        
         const dCity = getFmt(ci)
+        cityList.push({ id: ci, name: dCity })
 
         for (const t of servers) {
+          const num = t[0]
+          const load = t[1]
+          const ipNumeric = t[2]
+          const keyIdx = t[3]
+          const hName = t[4] || ""
+          const dedup = t[5] || ""
+
+          const ip = [
+            (ipNumeric >>> 24) & 255,
+            (ipNumeric >>> 16) & 255,
+            (ipNumeric >>> 8) & 255,
+            ipNumeric & 255
+          ].join('.')
+
+          const prefix = lowCode === "gb" ? "uk" : lowCode;
+          const endpoint = hName || `${prefix}${num}.nordvpn.com`;
+          const publicKey = k[keyIdx]
+
+          const fileName = `${lowCode}${num}${dedup}.conf`
+          const dName = `${dCountry} ${num}${dedup ? ` (${dedup.replace('_', '')})` : ''}`
+
           list.push(markRaw({
-            name: t[idx.name],
-            load: t[idx.load],
-            ip: t[idx.station],
+            name: fileName,
+            load,
+            ip,
+            publicKey,
+            endpoint,
+            fileName,
             country: cn,
             city: ci,
-            dName: formatName(t[idx.name]),
+            dName,
             dCountry,
             dCity
           }))
         }
       }
-      cMap[cn] = cityList.sort().map(c => ({ id: c, name: getFmt(c) }))
+      cMap[cn] = cityList
     }
 
     all.value = list
-    countries.value = [...cSet].sort().map(c => ({ id: c, name: getFmt(c) }))
+    countries.value = cList
     cityMap.value = cMap
   }
 
@@ -105,14 +134,15 @@ export function useServers() {
     error.value = ''
 
     try {
-      if (window.__SERVER_LIST__ && window.__SERVER_LIST__.h && window.__SERVER_LIST__.l) {
-        processServerData(window.__SERVER_LIST__.h, window.__SERVER_LIST__.l)
+      if (window.__SERVER_LIST__ && window.__SERVER_LIST__.k && window.__SERVER_LIST__.l) {
+        const { k, l } = window.__SERVER_LIST__
+        processServerData(k, l)
         loading.value = false
         return
       }
 
-      const { h, l } = await api.getServers()
-      processServerData(h, l)
+      const { k, l } = await api.getServers()
+      processServerData(k, l)
     } catch (e) {
       error.value = e.message || 'Failed to load servers'
       console.error(e)
@@ -122,6 +152,7 @@ export function useServers() {
   }
 
   return {
+    filtered,
     visible,
     loading,
     error,

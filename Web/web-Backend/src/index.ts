@@ -1,6 +1,6 @@
 import { createApp } from "./app";
 import { refreshServerDatabase } from "./services/database";
-import { KV_SERVERS_JSON_KEY, KV_VERSION_KEY } from "./constants";
+import { KV_INJECTION_KEY, KV_VERSION_KEY } from "./constants";
 
 export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -25,15 +25,13 @@ export default {
       return assetResponse;
     }
 
-    const serversJson = await env.NORDGEN_KV.get(KV_SERVERS_JSON_KEY);
+    const injectionScript = await env.NORDGEN_KV.get(KV_INJECTION_KEY);
     const version = await env.NORDGEN_KV.get(KV_VERSION_KEY);
-    if (!serversJson || !version) {
+    if (!injectionScript || !version) {
       return assetResponse;
     }
 
     const html = await assetResponse.text();
-    const safeServersJson = serversJson.replace(/</g, "\\u003c");
-    const injectionScript = `<script>window.__SERVER_LIST__=${safeServersJson};</script>`;
     const injectedHtml = html.replace("</head>", `${injectionScript}</head>`);
 
     const response = new Response(injectedHtml, {

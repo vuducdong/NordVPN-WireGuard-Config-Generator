@@ -1,14 +1,7 @@
-export const KEEPALIVE_MIN = 15;
-export const KEEPALIVE_MAX = 120;
-export const KEEPALIVE_DEFAULT = 25;
-export const DEFAULT_DNS = "103.86.96.100";
-
 export const RATE_LIMIT_CONFIG = 100;
-export const RATE_LIMIT_BATCH = 5;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 
-export const KV_DATABASE_KEY = "global:database";
-export const KV_SERVERS_JSON_KEY = "global:servers_json";
+export const KV_INJECTION_KEY = "global:injection_string";
 export const KV_VERSION_KEY = "global:version";
 export const KV_DEPLOY_TOKEN_KEY = "global:deploy_token";
 

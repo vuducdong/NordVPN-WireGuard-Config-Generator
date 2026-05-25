@@ -1,12 +1,12 @@
 # NordGen Backend Worker
 
-A high-performance edge service for querying NordVPN WireGuard server topologies and generating configuration templates. Built on **Cloudflare Workers** and the **Hono** framework, this service handles caching, proxying, and configuration assembly with strict zero-knowledge isolation.
+A high-performance edge service for querying NordVPN WireGuard server topologies. Built on **Cloudflare Workers** and the **Hono** framework, this service handles caching and proxying with strict zero-knowledge isolation.
 
 ## Overview
 
-This application serves as the API layer for the NordGen project. It is deployed as a serverless edge function that interfaces with NordVPN's infrastructure to retrieve server lists and exchange authentication tokens. 
+This application serves as the API layer for the NordGen project. It is deployed as a serverless edge function that interfaces with NordVPN's infrastructure to retrieve server lists and exchange authentication tokens.
 
-By default, the backend operates as a public-key infrastructure layer. It returns structural configuration templates (`mode: "client"`) that allow frontends to hydrate cryptographic keys locally, ensuring private keys never traverse the backend network during configuration generation.
+The backend operates strictly as a data-provisioning layer. The frontend hydrates cryptographic keys and generates configuration files locally, ensuring private keys and configuration generation logic are maintained exclusively on the client side.
 
 ## Prerequisites
 
@@ -58,4 +58,4 @@ bun run deploy
 
 ## API Documentation
 
-For detailed endpoint specifications, request/response formats, validation schemas, and client/server mode documentation, please refer to the API Documentation located in [API.md](./API.md).
+For detailed endpoint specifications, request/response formats, and validation schemas, please refer to the API Documentation located in [API.md](./API.md).

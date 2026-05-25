@@ -1,9 +1,14 @@
 import { Hono } from "hono";
-import { KV_SERVERS_JSON_KEY, KV_VERSION_KEY } from "../constants";
 import { configRateLimit } from "../middleware/rate-limit";
 import { refreshServerDatabase } from "../services/database";
 
 const serversRoute = new Hono<{ Bindings: Env }>();
+
+let apiResponseMemoryCache: { value: string; version: string } | null = null;
+
+export function clearMemoryCache(): void {
+  apiResponseMemoryCache = null;
+}
 
 serversRoute.get("/", configRateLimit(), async (c) => {
   const cache = caches.default;
@@ -14,14 +19,21 @@ serversRoute.get("/", configRateLimit(), async (c) => {
     return cachedResponse;
   }
 
-  let version = await c.env.NORDGEN_KV.get(KV_VERSION_KEY);
-  if (!version) {
-    await refreshServerDatabase(c.env);
-    version = await c.env.NORDGEN_KV.get(KV_VERSION_KEY);
-  }
+  let version = "";
+  let value = "";
 
-  if (!version) {
-    return c.json({ error: "Initializing" }, 503);
+  if (apiResponseMemoryCache) {
+    version = apiResponseMemoryCache.version;
+    value = apiResponseMemoryCache.value;
+  } else {
+    const result = await c.env.NORDGEN_KV.getWithMetadata<{ version: string }>("global:api_response");
+    if (!result.value || !result.metadata?.version) {
+      c.executionCtx.waitUntil(refreshServerDatabase(c.env));
+      return c.json({ error: "Initializing" }, 503);
+    }
+    version = result.metadata.version;
+    value = result.value;
+    apiResponseMemoryCache = { value, version };
   }
 
   const clientETag = c.req.header("if-none-match");
@@ -33,12 +45,7 @@ serversRoute.get("/", configRateLimit(), async (c) => {
     return res;
   }
 
-  const serversJson = await c.env.NORDGEN_KV.get(KV_SERVERS_JSON_KEY);
-  if (!serversJson) {
-    return c.json({ error: "Initializing" }, 503);
-  }
-
-  const response = new Response(serversJson, {
+  const response = new Response(value, {
     status: 200,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
