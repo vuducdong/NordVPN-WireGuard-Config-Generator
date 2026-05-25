@@ -1,7 +1,8 @@
 import { ref } from 'vue'
 import { api } from '@/services/apiService'
 import { storage } from '@/services/storageService'
-import { Validators, sanitizeName } from '@/utils/utils'
+import { Validators } from '@/utils/utils'
+import { createZipArchive } from '@/utils/zip'
 
 const KEY = 'wg_gen_settings'
 const DEF = { dns: '103.86.96.100', endpoint: 'hostname', keepalive: 25 }
@@ -35,10 +36,7 @@ export function useConfig() {
   }
 
   const make = s => ({
-    country: sanitizeName(s.country),
-    city: sanitizeName(s.city),
     name: s.name,
-    privateKey: privKey.value,
     dns: settings.value.dns,
     endpoint: settings.value.endpoint,
     keepalive: settings.value.keepalive
@@ -54,21 +52,46 @@ export function useConfig() {
   }
 
   const dl = async s => {
-    const { blob, name } = await api.dlConfig(make(s))
-    saveBlob(blob, name || `${s.name}.conf`)
+    if (privKey.value) {
+      const payload = { ...make(s), mode: "client" }
+      const { filename, template } = await api.genConfig(payload)
+      const finalConfig = template.replace("__CLIENT_PK__", privKey.value)
+      const blob = new Blob([finalConfig], { type: 'application/x-wireguard-config' })
+      saveBlob(blob, filename)
+    } else {
+      const payload = { ...make(s), mode: "server" }
+      const { blob, name } = await api.dlConfig(payload)
+      saveBlob(blob, name || `${s.name}.conf`)
+    }
   }
 
   const dlBatch = async (filters = {}) => {
-    const body = {
-      privateKey: privKey.value,
+    const payload = {
       dns: settings.value.dns,
       endpoint: settings.value.endpoint,
       keepalive: settings.value.keepalive,
       country: filters.country || '',
       city: filters.city || ''
     }
-    const { blob, name } = await api.dlBatch(body)
-    saveBlob(blob, name)
+
+    if (privKey.value) {
+      payload.mode = "client"
+      const { archiveName, templates } = await api.dlBatch(payload)
+      const entries = templates.map(t => {
+        const finalConfig = t.template.replace("__CLIENT_PK__", privKey.value)
+        return {
+          name: t.name,
+          data: new TextEncoder().encode(finalConfig)
+        }
+      })
+      const zipData = createZipArchive(entries)
+      const blob = new Blob([zipData], { type: 'application/zip' })
+      saveBlob(blob, `${archiveName}.zip`)
+    } else {
+      payload.mode = "server"
+      const { blob, name } = await api.dlBatch(payload)
+      saveBlob(blob, name)
+    }
   }
 
   return {
@@ -80,7 +103,17 @@ export function useConfig() {
     setKey: k => { if (Validators.Key.valid(k)) privKey.value = k; else throw new Error(Validators.Key.err) },
     dl,
     dlBatch,
-    copy: async s => navigator.clipboard.writeText(await api.genConfig(make(s))),
+    copy: async s => {
+      if (privKey.value) {
+        const payload = { ...make(s), mode: "client" }
+        const { template } = await api.genConfig(payload)
+        const finalConfig = template.replace("__CLIENT_PK__", privKey.value)
+        return navigator.clipboard.writeText(finalConfig)
+      } else {
+        const { template } = await api.genConfig({ ...make(s), mode: "server" })
+        return navigator.clipboard.writeText(template)
+      }
+    },
     make
   }
 }

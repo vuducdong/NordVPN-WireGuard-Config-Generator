@@ -1,8 +1,5 @@
 const RX = {
   WORD: /^([a-z]+)(\d+)?$/i,
-  NAME: /[\/\\:*?"<>|#]/g,
-  MULTI: /_+/g,
-  TRIM: /^_|_$/g,
   IPV4: /^(\d{1,3}\.){3}\d{1,3}$/,
   KEY: /^[A-Za-z0-9+/]{43}=$/,
   TOKEN: /^[a-f0-9]{64}$/i,
@@ -16,11 +13,6 @@ export const formatName = s => {
     return w.charAt(0).toUpperCase() + w.slice(1) + (n ? ` ${n}` : '')
   }).join(' ')
 }
-
-export const sanitizeName = s => s.toLowerCase()
-  .replace(RX.NAME, '_')
-  .replace(RX.MULTI, '_')
-  .replace(RX.TRIM, '')
 
 export const Validators = {
   Key: {

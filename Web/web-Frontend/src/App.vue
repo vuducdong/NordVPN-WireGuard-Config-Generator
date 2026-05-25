@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch, nextTick, computed } from 'vue'
+import { onMounted, ref, watch, nextTick, computed } from 'vue'
 import { useServers } from '@/composables/useServers'
 import { useConfig } from '@/composables/useConfig'
 import { useUI } from '@/composables/useUI'
@@ -10,6 +10,8 @@ import Toast from '@/components/Toast.vue'
 import Icon from '@/components/Icon.vue'
 import ConfigCustomizer from '@/components/ConfigCustomizer.vue'
 import KeyGenerator from '@/components/KeyGenerator.vue'
+import { generate } from 'lean-qr'
+import { toSvgSource } from 'lean-qr/extras/svg'
 
 const srv = useServers()
 const cfg = useConfig()
@@ -94,8 +96,22 @@ const cp = async s => {
 }
 
 const qr = s => {
-  ui.showQR(s, () => api.genQR(cfg.make(s)))
-    .catch(e => notif.show(e.message || 'QR generation failed', 'error'))
+  ui.showQR(s, async () => {
+    if (cfg.privKey.value) {
+      const templatePayload = await api.genConfig({ ...cfg.make(s), mode: "client" })
+      const finalConfig = templatePayload.template.replace("__CLIENT_PK__", cfg.privKey.value)
+      const code = generate(finalConfig)
+      const svgText = toSvgSource(code, {
+        on: "#000000",
+        off: "#ffffff",
+        pad: 1,
+        width: 256,
+      })
+      return new Blob([svgText], { type: "image/svg+xml" })
+    } else {
+      return api.genQR({ ...cfg.make(s), mode: "server" })
+    }
+  }).catch(e => notif.show(e.message || 'QR generation failed', 'error'))
 }
 
 onMounted(async () => {
@@ -116,15 +132,9 @@ onMounted(async () => {
   window.addEventListener('scroll', onScroll, { passive: true })
 })
 
-onUnmounted(() => {
-  obs?.disconnect()
-  ro?.disconnect()
-  window.removeEventListener('scroll', onScroll)
-  ui.cleanQR()
-})
-
 watch([srv.fCountry, srv.fCity], observe)
 </script>
+
 
 <template>
   <Toast v-if="notif.toast.value" :msg="notif.toast.value.message" :type="notif.toast.value.type" @close="notif.toast.value = null" />
@@ -197,8 +207,8 @@ watch([srv.fCountry, srv.fCity], observe)
         </label>
       </div>
       <div class="p-4 space-y-3 border-t border-vscode-active bg-nord-bg-overlay/20">
-        <a href="https://github.com/mustafachyi/NordVPN-WireGuard-Config-Generator" target="_blank" class="block w-full px-2 sm:px-4 py-2 rounded border border-vscode-active bg-nord-bg-overlay/20 text-xs sm:text-sm hover:bg-nord-bg-hover"><div class="flex items-center gap-1.5 sm:gap-2"><Icon name="github" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-vscode-accent" /><span>Star on GitHub</span></div></a>
-        <a href="https://refer-nordvpn.com/MXIVDoJGpKT" target="_blank" class="block w-full px-2 sm:px-4 py-2 rounded border border-vscode-active bg-nord-bg-overlay/20 text-xs sm:text-sm hover:bg-nord-bg-hover"><div class="flex items-center gap-1.5 sm:gap-2"><Icon name="externalLink" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-vscode-accent" /><span>Get NordVPN</span></div></a>
+        <a href="https://github.com/mustafachyi/NordVPN-WireGuard-Config-Generator" target="_blank" rel="noopener noreferrer" class="block w-full px-2 sm:px-4 py-2 rounded border border-vscode-active bg-nord-bg-overlay/20 text-xs sm:text-sm hover:bg-nord-bg-hover"><div class="flex items-center gap-1.5 sm:gap-2"><Icon name="github" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-vscode-accent" /><span>Star on GitHub</span></div></a>
+        <a href="https://refer-nordvpn.com/MXIVDoJGpKT" target="_blank" rel="noopener noreferrer" class="block w-full px-2 sm:px-4 py-2 rounded border border-vscode-active bg-nord-bg-overlay/20 text-xs sm:text-sm hover:bg-nord-bg-hover"><div class="flex items-center gap-1.5 sm:gap-2"><Icon name="externalLink" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-vscode-accent" /><span>Get NordVPN</span></div></a>
       </div>
     </aside>
 
