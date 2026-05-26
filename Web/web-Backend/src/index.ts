@@ -3,8 +3,8 @@ import { refreshServerDatabase } from "./services/database";
 import { KV_INJECTION_KEY, KV_VERSION_KEY } from "./constants";
 
 export default {
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(refreshServerDatabase(env));
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await refreshServerDatabase(env);
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
