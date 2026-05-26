@@ -6,7 +6,7 @@ export const KV_VERSION_KEY = "global:version";
 export const KV_DEPLOY_TOKEN_KEY = "global:deploy_token";
 
 export const NORDVPN_SERVERS_URL =
-  "https://api.nordvpn.com/v1/servers?limit=16384&filters[servers_technologies][identifier]=wireguard_udp";
+  "https://api.nordvpn.com/v1/servers?limit=16384&filters[servers_technologies][identifier]=wireguard_udp&fields[station]=1&fields[hostname]=1&fields[load]=1&fields[technologies.metadata]=1&fields[locations.country.name]=1&fields[locations.country.code]=1&fields[locations.country.city.name]=1&fields[specifications.identifier]=1&fields[specifications.values.value]=1";
 export const NORDVPN_CREDENTIALS_URL =
   "https://api.nordvpn.com/v1/users/services/credentials";
 

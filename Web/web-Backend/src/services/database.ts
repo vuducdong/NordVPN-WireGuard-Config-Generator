@@ -8,8 +8,21 @@ import { validateVersion } from "../lib/version";
 import { clearMemoryCache } from "../routes/servers";
 
 function ipToNumeric(ip: string): number {
-  const parts = ip.split(".").map(Number);
-  return ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
+  let val = 0;
+  let octet = 0;
+  let shift = 24;
+  const len = ip.length;
+  for (let i = 0; i < len; i++) {
+    const charCode = ip.charCodeAt(i);
+    if (charCode === 46) {
+      val = (val | (octet << shift)) >>> 0;
+      octet = 0;
+      shift -= 8;
+    } else {
+      octet = octet * 10 + (charCode - 48);
+    }
+  }
+  return (val | (octet << shift)) >>> 0;
 }
 
 export async function refreshServerDatabase(env: Env): Promise<void> {
@@ -19,7 +32,6 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
   const rawServers: Array<Record<string, unknown>> = await response.json() as Array<Record<string, unknown>>;
 
   interface RawServer {
-    name: string;
     station: string;
     hostname: string;
     load: number;
@@ -29,7 +41,6 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
   }
 
   const processedServers: Array<{
-    name: string;
     station: string;
     hostname: string;
     country: string;
@@ -45,6 +56,37 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
 
   const uniqueKeys: string[] = [];
   const keyMap = new Map<string, number>();
+
+  const normalizeCache = new Map<string, string>();
+  const sanitizeCache = new Map<string, string>();
+  const lowCodeCache = new Map<string, string>();
+
+  function getNormalized(val: string): string {
+    let res = normalizeCache.get(val);
+    if (res === undefined) {
+      res = normalizeName(val);
+      normalizeCache.set(val, res);
+    }
+    return res;
+  }
+
+  function getSanitized(val: string): string {
+    let res = sanitizeCache.get(val);
+    if (res === undefined) {
+      res = sanitizeIdentifier(val);
+      sanitizeCache.set(val, res);
+    }
+    return res;
+  }
+
+  function getLowCode(val: string): string {
+    let res = lowCodeCache.get(val);
+    if (res === undefined) {
+      res = val.toLowerCase();
+      lowCodeCache.set(val, res);
+    }
+    return res;
+  }
 
   for (const raw of rawServers) {
     const server = raw as unknown as RawServer;
@@ -87,14 +129,12 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
       keyMap.set(publicKey, keyIdx);
     }
 
-    const countryName = normalizeName(location.country.name);
-    const cityName = normalizeName(location.country.city.name);
-    const lowCountryCode = location.country.code.toLowerCase();
-    const serverName = normalizeName(server.name);
-    const serverNumber = extractNumber(server.name) || "wg";
+    const countryName = getNormalized(location.country.name);
+    const cityName = getNormalized(location.country.city.name);
+    const lowCountryCode = getLowCode(location.country.code);
+    const serverNumber = extractNumber(server.hostname) || "wg";
 
     processedServers.push({
-      name: serverName,
       station: server.station,
       hostname: server.hostname,
       country: countryName,
@@ -110,9 +150,18 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
   }
 
   processedServers.sort((a, b) => {
-    if (a.country !== b.country) return a.country.localeCompare(b.country);
-    if (a.city !== b.city) return a.city.localeCompare(b.city);
-    return a.name.localeCompare(b.name);
+    if (a.country !== b.country) {
+      return a.country < b.country ? -1 : 1;
+    }
+    if (a.city !== b.city) {
+      return a.city < b.city ? -1 : 1;
+    }
+    const numA = parseInt(a.number, 10);
+    const numB = parseInt(b.number, 10);
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB;
+    }
+    return a.number.localeCompare(b.number);
   });
 
   let cityStart = 0;
@@ -146,8 +195,8 @@ export async function refreshServerDatabase(env: Env): Promise<void> {
   let currentCityArr: [string, Array<Array<number | string>>] | null = null;
 
   for (const srv of processedServers) {
-    const countryKey = sanitizeIdentifier(srv.rawCountryName);
-    const cityKey = sanitizeIdentifier(srv.rawCityName);
+    const countryKey = getSanitized(srv.rawCountryName);
+    const cityKey = getSanitized(srv.rawCityName);
 
     if (!currentCountryArr || currentCountry !== countryKey) {
       currentCountry = countryKey;
