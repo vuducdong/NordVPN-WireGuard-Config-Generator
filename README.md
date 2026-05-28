@@ -14,7 +14,7 @@ A command line tool that generates optimized NordVPN WireGuard configurations. I
 
 ### Python Package (PyPI)
 
-Because this is a command line application, [`pipx`](https://pipx.pypa.io/) is the recommended installer. It isolates the tool inside its own environment and exposes the executable on your PATH without touching the system Python.
+Because this is a command line application, `pipx` is the recommended installer. It isolates the tool inside its own environment and exposes the executable on your PATH without touching the system Python.
 
 ```bash
 pipx install nord-config-generator
@@ -30,7 +30,7 @@ pip install nord-config-generator
 
 For a dependency free environment, the application can be run via Docker. The container ships a Go compiled binary, which keeps the image small and startup near instant. To prevent filesystem permission conflicts and ensure generated configurations are owned by the host user, the output directory **must** be created manually before execution.
 
-### Method 1: Docker Compose (Recommended)
+### Method 1: Docker Compose
 
 1.  **Initialize the output directory:**
     ```bash
@@ -93,6 +93,12 @@ nordgen --help
 A browser based version of the generator is available for immediate use without local installation.
 
 *   **Live Application:** [https://nordgen.selfhoster.win/](https://nordgen.selfhoster.win/)
+
+## Dedicated IP Servers
+
+The server catalogue contains endpoints labeled under the "Dedicated IP" group. These servers require a specific, active Dedicated IP add on subscription associated with your NordVPN account.
+
+If you have not purchased this add on from NordVPN, attempting to connect to these endpoints will fail, even with a valid NordLynx private key and active subscription. Standard accounts should exclude these endpoints and utilize the "Standard" or "P2P" groups for general connectivity.
 
 ## Support
 
