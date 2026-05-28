@@ -3,7 +3,11 @@ import { ref } from 'vue'
 const TIME = 2000
 const MAX = 100
 
+let instance = null
+
 export function useToast() {
+  if (instance) return instance
+
   const toast = ref(null)
   let timer = null
 
@@ -15,5 +19,6 @@ export function useToast() {
     timer = setTimeout(() => { toast.value = null }, TIME)
   }
 
-  return { toast, show }
+  instance = { toast, show }
+  return instance
 }

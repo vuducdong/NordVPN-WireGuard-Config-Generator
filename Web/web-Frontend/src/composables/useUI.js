@@ -1,10 +1,15 @@
 import { reactive, toRefs, watch } from 'vue'
 import { storage } from '@/services/storageService'
 
+let instance = null
+
 export function useUI() {
+  if (instance) return instance
+
   const state = reactive({
     panel: false,
     topBtn: false,
+    headerHeight: 0,
     showIp: storage.get('showIp') === true,
     modals: { custom: false, key: false, qr: false },
     qrUrl: '',
@@ -16,7 +21,7 @@ export function useUI() {
   const close = () => state.panel = false
   const open = m => { close(); Object.keys(state.modals).forEach(k => state.modals[k] = k === m) }
 
-  return {
+  instance = {
     ...toRefs(state),
     close,
     toggle: () => state.panel = !state.panel,
@@ -37,4 +42,6 @@ export function useUI() {
       }
     }
   }
+
+  return instance
 }

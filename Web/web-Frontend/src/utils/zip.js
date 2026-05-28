@@ -16,8 +16,9 @@ function computeCRC32(data) {
 }
 
 export function createZipArchive(entries) {
+  const encoder = new TextEncoder()
   const metadata = entries.map((entry) => {
-    const nameBytes = new TextEncoder().encode(entry.name)
+    const nameBytes = encoder.encode(entry.name)
     const crc = computeCRC32(entry.data)
     const size = entry.data.length
     return { nameBytes, crc, size }

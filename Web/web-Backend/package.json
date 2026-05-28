@@ -12,11 +12,11 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "wrangler": "^4.94.0"
+    "wrangler": "^4.95.0"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.8.0",
-    "hono": "4.12.22",
+    "hono": "4.12.23",
     "hono-rate-limiter": "^0.5.3",
     "zod": "^4.4.3"
   }

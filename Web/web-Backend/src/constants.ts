@@ -2,7 +2,6 @@ export const RATE_LIMIT_CONFIG = 100;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 
 export const KV_INJECTION_KEY = "global:injection_string";
-export const KV_VERSION_KEY = "global:version";
 export const KV_DEPLOY_TOKEN_KEY = "global:deploy_token";
 
 export const CUSTOM_API_URL = "https://nordcache.selfhoster.win/api/servers";

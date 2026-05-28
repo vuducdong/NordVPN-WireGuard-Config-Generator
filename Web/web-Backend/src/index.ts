@@ -1,6 +1,6 @@
-import { createApp } from "./app";
+import { app } from "./app";
 import { refreshServerDatabase } from "./services/database";
-import { KV_INJECTION_KEY, KV_VERSION_KEY } from "./constants";
+import { getOrInitializeState } from "./services/memory";
 
 export default {
   async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -11,42 +11,54 @@ export default {
     const path = url.pathname;
 
     if (path.startsWith("/api/")) {
-      const app = createApp();
       return app.fetch(request, env, ctx);
     }
 
+    const isHtmlRequest = path.endsWith("/") || path.endsWith("index.html");
+    let state = null;
+
+    if (isHtmlRequest) {
+      state = await getOrInitializeState(env);
+      if (state) {
+        const clientETag = request.headers.get("if-none-match");
+        const currentETag = `"${state.version}"`;
+        if (clientETag === currentETag || clientETag === `W/"${state.version}"`) {
+          return new Response(null, {
+            status: 304,
+            headers: {
+              "etag": currentETag,
+              "cache-control": "public, max-age=60, must-revalidate",
+              "vary": "Accept-Encoding"
+            }
+          });
+        }
+      }
+    }
+
     const assetResponse = await env.ASSETS.fetch(request);
-    if (assetResponse.status !== 200) {
+    if (assetResponse.status !== 200 || !isHtmlRequest || !state) {
       return assetResponse;
     }
 
     const contentType = assetResponse.headers.get("content-type");
-    if (!contentType?.includes("text/html") || (!path.endsWith("/") && !path.endsWith("index.html"))) {
-      return assetResponse;
-    }
-
-    const injectionScript = await env.NORDGEN_KV.get(KV_INJECTION_KEY);
-    const version = await env.NORDGEN_KV.get(KV_VERSION_KEY);
-    if (!injectionScript || !version) {
+    if (!contentType?.includes("text/html")) {
       return assetResponse;
     }
 
     const html = await assetResponse.text();
-    const injectedHtml = html.replace("</head>", `${injectionScript}</head>`);
+    const injectedHtml = html.replace("</head>", `${state.injectionScript}</head>`);
 
-    const response = new Response(injectedHtml, {
+    return new Response(injectedHtml, {
       status: 200,
       headers: {
         "content-type": "text/html;charset=utf-8",
         "cache-control": "public, max-age=60, must-revalidate",
-        "etag": `"${version}"`,
+        "etag": `"${state.version}"`,
         "vary": "Accept-Encoding",
         "x-frame-options": "DENY",
         "x-content-type-options": "nosniff",
         "referrer-policy": "strict-origin-when-cross-origin"
       }
     });
-
-    return response;
   }
 };

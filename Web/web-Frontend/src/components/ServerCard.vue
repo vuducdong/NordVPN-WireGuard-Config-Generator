@@ -18,6 +18,17 @@ const getLoadClass = l => {
   return 'bg-nord-load-critical-bg text-nord-load-critical-text'
 }
 
+const getTags = mask => {
+  if (!mask) return []
+  const res = []
+  if (mask & 1) res.push('Standard')
+  if (mask & 2) res.push('P2P')
+  if (mask & 4) res.push('Dedicated IP')
+  if (mask & 8) res.push('Onion')
+  if (mask & 16) res.push('Double VPN')
+  return res
+}
+
 const copyIp = () => {
   if (props.s.ip) {
     navigator.clipboard.writeText(props.s.ip)
@@ -27,14 +38,11 @@ const copyIp = () => {
 </script>
 
 <template>
-  <article class="relative md:hover:z-10 p-2.5 bg-nord-bg-card border-l-2 border-transparent md:hover:border-nord-button-primary md:hover:bg-nord-bg-hover group transition-transform duration-150 md:hover:scale-[1.02] will-change-transform">
+  <article class="relative flex flex-col justify-between md:hover:z-10 p-2.5 bg-nord-bg-card border-l-2 border-transparent md:hover:border-nord-button-primary md:hover:bg-nord-bg-hover group transition-transform duration-150 md:hover:scale-[1.02] will-change-transform min-h-24">
     <div class="flex justify-between items-start gap-2">
       <div class="min-w-0 flex-1">
         <h3 class="font-medium truncate">{{ s.dName }}</h3>
         <p class="text-sm text-nord-text-secondary truncate">{{ s.dCountry }} - {{ s.dCity }}</p>
-        <button v-if="s.ip" type="button" class="mt-1 px-1.5 py-0.5 -ml-1.5 rounded text-sm font-medium text-nord-text-secondary/50 truncate hover:text-nord-text-primary hover:bg-nord-bg-active transition-colors hidden group-[.show-ips]/grid:inline-block" @click.stop="copyIp">
-          {{ s.ip }}
-        </button>
       </div>
       <div class="flex items-center gap-1 shrink-0">
         <span :class="['text-xs px-1.5 py-0.5 rounded font-medium', getLoadClass(s.load)]">{{ s.load }}%</span>
@@ -44,6 +52,15 @@ const copyIp = () => {
           </button>
         </div>
       </div>
+    </div>
+    
+    <div class="mt-2 flex flex-wrap items-center justify-end gap-1.5 min-h-6">
+      <button v-if="s.ip" type="button" class="mr-auto -ml-1.5 px-1.5 py-0.5 rounded text-sm font-medium text-nord-text-secondary/50 truncate hover:text-nord-text-primary hover:bg-nord-bg-active transition-colors hidden group-[.show-ips]/grid:block" @click.stop="copyIp">
+        {{ s.ip }}
+      </button>
+      <span v-for="t in getTags(s.groupMask)" :key="t" class="px-2 py-0.5 rounded bg-nord-button-secondary/40 border border-nord-button-secondary text-nord-text-primary text-xs font-medium shadow-sm">
+        {{ t }}
+      </span>
     </div>
   </article>
 </template>
