@@ -96,17 +96,17 @@ A browser based version of the generator is available for immediate use without 
 
 ## Dedicated IP Servers
 
-The server catalogue contains endpoints labeled under the "Dedicated IP" group. These servers require a specific, active Dedicated IP add on subscription associated with your NordVPN account.
+The server catalogue contains endpoints designated under the `Dedicated IP` group. These servers require a specific, active `Dedicated IP` add on subscription associated with your NordVPN account. 
 
-If you have not purchased this add on from NordVPN, attempting to connect to these endpoints will fail, even with a valid NordLynx private key and active subscription. Standard accounts should exclude these endpoints and utilize the "Standard" or "P2P" groups for general connectivity.
+If you have not purchased this add on from NordVPN, attempting to connect to these endpoints will fail, even with a valid NordLynx private key and active subscription. Standard accounts should exclude these endpoints and utilize the `Standard` or `P2P` groups for general connectivity.
 
 ## Support
 
 If this project saves you time, there are a few ways to give something back.
 
-1.  **Star the repository** on GitHub so it reaches more people who need it.
-2.  **Sign up through the referral link** if you are new to NordVPN: [https://ref.nordvpn.com/MXIVDoJGpKT](https://ref.nordvpn.com/MXIVDoJGpKT)
-3.  **Buy me a coffee** on Ko-fi if you want to fuel future updates: [https://ko-fi.com/mustafachyi](https://ko-fi.com/mustafachyi)
+[![GitHub stars](https://img.shields.io/github/stars/mustafachyi/NordVPN-WireGuard-Config-Generator?style=for-the-badge&color=24292e&logo=github)](https://github.com/mustafachyi/NordVPN-WireGuard-Config-Generator/stargazers)
+[![Get NordVPN](https://img.shields.io/badge/Get%20NordVPN-4687FF?style=for-the-badge&logo=nordvpn&logoColor=white)](https://ref.nordvpn.com/MXIVDoJGpKT)
+[![Buy Me A Coffee](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/mustafachyi)
 
 ## License
 
