@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 @dataclass(slots=True, frozen=True)
 class Server:
@@ -13,15 +13,17 @@ class Server:
     longitude: float
     public_key: str
     distance: float
+    combo: str
 
 @dataclass(slots=True, frozen=True)
 class UserPreferences:
     dns: str = "103.86.96.100"
     use_ip: bool = False
     keepalive: int = 25
+    groups: list[str] | None = None
+    exclude_dedicated: bool = False
 
 @dataclass(slots=True)
 class GenerationStats:
     total: int = 0
     best: int = 0
-    rejected: int = 0

@@ -16,7 +16,7 @@ jobs:
       - name: Generate CLI Dockerfile
         run: |
           cat <<EOF > cli.Dockerfile
-          FROM golang:1.25.6-alpine3.23 AS builder
+          FROM golang:1.26.3-alpine3.22 AS builder
           WORKDIR /build
           RUN apk add --no-cache ca-certificates
           COPY nordgen-go/go.mod nordgen-go/go.sum ./
@@ -24,7 +24,7 @@ jobs:
           COPY nordgen-go/ .
           RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o nordgen ./cmd/nordgen
 
-          FROM alpine:3.23
+          FROM alpine:3.22.4
           RUN apk add --no-cache ca-certificates
           COPY --from=builder /build/nordgen /usr/local/bin/nordgen
           WORKDIR /data

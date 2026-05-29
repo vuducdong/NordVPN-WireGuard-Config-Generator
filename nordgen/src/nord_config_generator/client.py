@@ -4,12 +4,11 @@ from typing import Optional
 
 import aiohttp
 
+from .constants import GEO_URL, SERVERS_URL
+
 
 class NordClient:
     BASE_URL = "https://api.nordvpn.com/v1"
-    GEO_URL = "https://api.nordvpn.com/v1/helpers/ips/insights"
-    SERVER_FETCH_LIMIT = "16384"
-    WIREGUARD_TECHNOLOGY = "wireguard_udp"
 
     def __init__(self) -> None:
         self._session: Optional[aiohttp.ClientSession] = None
@@ -40,6 +39,8 @@ class NordClient:
                 if response.status != 200:
                     return None
                 payload = await response.json()
+                if not isinstance(payload, dict):
+                    return None
                 return payload.get("nordlynx_private_key")
         except (aiohttp.ClientError, json.JSONDecodeError):
             return None
@@ -47,15 +48,14 @@ class NordClient:
     async def get_servers(self) -> list[dict]:
         if self._session is None:
             return []
-        params = {
-            "limit": self.SERVER_FETCH_LIMIT,
-            "filters[servers_technologies][identifier]": self.WIREGUARD_TECHNOLOGY,
-        }
         try:
-            async with self._session.get(f"{self.BASE_URL}/servers", params=params) as response:
+            async with self._session.get(SERVERS_URL) as response:
                 if response.status != 200:
                     return []
-                return await response.json()
+                payload = await response.json()
+                if not isinstance(payload, list):
+                    return []
+                return payload
         except (aiohttp.ClientError, json.JSONDecodeError):
             return []
 
@@ -63,10 +63,12 @@ class NordClient:
         if self._session is None:
             return 0.0, 0.0
         try:
-            async with self._session.get(self.GEO_URL) as response:
+            async with self._session.get(GEO_URL) as response:
                 if response.status != 200:
                     return 0.0, 0.0
                 payload = await response.json()
+                if not isinstance(payload, dict):
+                    return 0.0, 0.0
                 return float(payload.get("latitude", 0)), float(payload.get("longitude", 0))
         except (aiohttp.ClientError, json.JSONDecodeError, ValueError):
             return 0.0, 0.0
