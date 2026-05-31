@@ -103,6 +103,10 @@ nordgen --help
 
 A browser-based version of the generator is available for immediate use without local installation.
 
+Please note that the link below is the only hosted instance under my ownership, and it runs the exact source code published in this repository. 
+
+If for whatever reason you choose to use another site that looks similar to mine, you do so strictly at your own risk. Third-party clones can easily modify the underlying code behind the scenes to put your data in danger or intercept your access tokens.
+
 *   **Live Application:** [https://nordgen.selfhoster.win/](https://nordgen.selfhoster.win/)
 
 ## Dedicated IP Servers
