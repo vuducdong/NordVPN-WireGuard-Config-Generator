@@ -11,6 +11,13 @@ const GROUPS = [
   { id: 16, name: 'Double VPN' }
 ]
 
+const isGroupMatch = (mask, g) => {
+  if (!g) return true
+  if (!(mask & g)) return false
+  if (g !== 4 && (mask & 4)) return false
+  return true
+}
+
 let instance = null
 
 export function useServers() {
@@ -27,10 +34,10 @@ export function useServers() {
   const limit = shallowRef(INC)
 
   const availableCountries = computed(() => {
-    const g = parseInt(fGroup.value, 10)
+    const g = parseInt(fGroup.value, 10) || 0
     const map = new Map()
     for (const s of all.value) {
-      if (!g || (s.groupMask & g)) {
+      if (isGroupMatch(s.groupMask, g)) {
         if (!map.has(s.country)) map.set(s.country, { id: s.country, name: s.dCountry })
       }
     }
@@ -39,10 +46,10 @@ export function useServers() {
 
   const availableCities = computed(() => {
     if (!fCountry.value) return []
-    const g = parseInt(fGroup.value, 10)
+    const g = parseInt(fGroup.value, 10) || 0
     const map = new Map()
     for (const s of all.value) {
-      if (s.country === fCountry.value && (!g || (s.groupMask & g))) {
+      if (s.country === fCountry.value && isGroupMatch(s.groupMask, g)) {
         if (!map.has(s.city)) map.set(s.city, { id: s.city, name: s.dCity })
       }
     }
@@ -64,12 +71,12 @@ export function useServers() {
   })
 
   const filtered = computed(() => {
-    const g = parseInt(fGroup.value, 10)
+    const g = parseInt(fGroup.value, 10) || 0
     const c = fCountry.value
     const t = fCity.value
     let list = all.value
 
-    if (g) list = list.filter(s => s.groupMask & g)
+    if (g) list = list.filter(s => isGroupMatch(s.groupMask, g))
     if (c) list = list.filter(s => s.country === c)
     if (t) list = list.filter(s => s.city === t)
 

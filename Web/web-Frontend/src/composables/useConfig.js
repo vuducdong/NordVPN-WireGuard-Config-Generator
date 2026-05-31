@@ -8,6 +8,16 @@ import { toSvgSource } from 'lean-qr/extras/svg'
 const KEY = 'wg_gen_settings'
 const DEF = { dns: '103.86.96.100', endpoint: 'hostname', keepalive: 25 }
 
+const COMBINATION_FOLDERS = Array.from({ length: 32 }, (_, mask) => {
+  const names = []
+  if (mask & 1) names.push('Standard')
+  if (mask & 2) names.push('P2P')
+  if (mask & 4) names.push('Dedicated_IP')
+  if (mask & 8) names.push('Onion_Over_VPN')
+  if (mask & 16) names.push('Double_VPN')
+  return names.length > 0 ? names.join('_') : 'Unknown'
+})
+
 function buildWireGuardConfig(privateKey, dns, publicKey, endpoint, keepalive) {
   return `[Interface]
 PrivateKey=${privateKey || ""}
@@ -21,10 +31,16 @@ Endpoint=${endpoint}:51820
 PersistentKeepalive=${keepalive}`;
 }
 
-function buildBatchFilePath(batchCountry, batchCity, s) {
-  if (batchCity !== "") return s.fileName
-  if (batchCountry === "") return `${s.country}/${s.city}/${s.fileName}`
-  return `${s.city}/${s.fileName}`
+function buildBatchFilePath(batchGroup, batchCountry, batchCity, s) {
+  const geoPath = batchCity !== "" 
+    ? s.fileName 
+    : batchCountry === "" 
+      ? `${s.country}/${s.city}/${s.fileName}` 
+      : `${s.city}/${s.fileName}`
+
+  return batchGroup === "" 
+    ? `${COMBINATION_FOLDERS[s.groupMask]}/${geoPath}` 
+    : geoPath
 }
 
 let instance = null
@@ -96,7 +112,7 @@ export function useConfig() {
 
     const encoder = new TextEncoder()
     const entries = servers.map(s => ({
-      name: buildBatchFilePath(targetCountry, targetCity, s),
+      name: buildBatchFilePath(targetGroup, targetCountry, targetCity, s),
       data: encoder.encode(buildText(s))
     }))
     
