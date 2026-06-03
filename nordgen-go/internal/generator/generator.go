@@ -244,7 +244,8 @@ func (g *Generator) writeJobsParallel(dirJobs []*DirJob, totalFiles int) error {
 	g.consoleManager.StopStatus()
 	g.consoleManager.Success("File system prepared")
 
-	g.consoleManager.StartProgress(totalFiles, "Writing configs")
+	msg := "Writing all configs"
+	g.consoleManager.StartProgress(totalFiles, msg)
 
 	var completed int32
 	var firstErr error
@@ -261,10 +262,10 @@ func (g *Generator) writeJobsParallel(dirJobs []*DirJob, totalFiles int) error {
 			select {
 			case <-ticker.C:
 				c := atomic.LoadInt32(&completed)
-				g.consoleManager.UpdateProgress(int(c), totalFiles, "Writing configs")
+				g.consoleManager.UpdateProgress(int(c), totalFiles, msg)
 			case <-uiDone:
 				c := atomic.LoadInt32(&completed)
-				g.consoleManager.UpdateProgress(int(c), totalFiles, "Writing configs")
+				g.consoleManager.UpdateProgress(int(c), totalFiles, msg)
 				return
 			}
 		}

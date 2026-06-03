@@ -1,6 +1,8 @@
 import argparse
 import asyncio
+import os
 import re
+import signal
 import sys
 import time
 
@@ -12,27 +14,35 @@ from .ui import ConsoleManager
 
 _TOKEN_PATTERN = re.compile(r"[0-9a-fA-F]{64}")
 
+
+def _sigint_handler(signum, frame) -> None:
+    print("\n\033[91m✗ Operation cancelled by user\033[0m")
+    os._exit(130)
+
+
 def _build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nordgen", description="NordVPN WireGuard Config Generator"
     )
     
-    parser.add_argument("-t", "--token", help="NordVPN Access Token")
-    parser.add_argument("-d", "--dns", default="103.86.96.100", help="DNS Server")
-    parser.add_argument("-i", "--ip", action="store_true", help="Use IP Endpoint")
-    parser.add_argument("-k", "--keepalive", type=int, default=25, help="Keepalive seconds")
+    parser.add_argument("-t", "--token", help="NordVPN Access Token", default=argparse.SUPPRESS)
+    parser.add_argument("-d", "--dns", help="DNS Server", default=argparse.SUPPRESS)
+    parser.add_argument("-i", "--ip", action="store_true", help="Use IP Endpoint", default=argparse.SUPPRESS)
+    parser.add_argument("-k", "--keepalive", type=int, help="Keepalive seconds", default=argparse.SUPPRESS)
     parser.add_argument(
         "-g",
         "--group",
         nargs="*",
         choices=sorted(ALIAS_TO_GROUP_ID.keys()),
         help="Server groups to include. Example: -g standard p2p.",
+        default=argparse.SUPPRESS
     )
     parser.add_argument(
         "-e",
         "--exclude-dedicated",
         action="store_true",
         help="Exclude servers in the dedicated IP group",
+        default=argparse.SUPPRESS
     )
 
     subparsers = parser.add_subparsers(dest="command", title="Commands", metavar="<command>")
@@ -41,6 +51,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     keyp.add_argument("-t", "--token", help="NordVPN Access Token", default="")
 
     return parser
+
 
 async def _resolve_private_key(
     ui: ConsoleManager, client: NordClient, token: str
@@ -58,6 +69,7 @@ async def _resolve_private_key(
     ui.success("Token validated")
     return key
 
+
 async def _run_get_key(ui: ConsoleManager, client: NordClient, token: str) -> None:
     ui.clear()
     ui.header()
@@ -68,13 +80,16 @@ async def _run_get_key(ui: ConsoleManager, client: NordClient, token: str) -> No
     if not token:
         ui.wait()
 
+
 async def _run_generate(
     ui: ConsoleManager,
     client: NordClient,
     token: str,
     preferences: UserPreferences,
+    provided_args: set[str],
 ) -> None:
     is_interactive = not bool(token)
+    prompt_prefs = len(provided_args - {"command"}) == 0
 
     ui.clear()
     ui.header()
@@ -84,10 +99,10 @@ async def _run_generate(
             ui.wait()
         return
 
-    if is_interactive:
+    if prompt_prefs:
         ui.clear()
         ui.header()
-        preferences = ui.prompt_preferences(preferences)
+        preferences = ui.prompt_preferences(preferences, provided_args)
 
     if preferences.keepalive < 0:
         ui.fail("Keepalive value must be greater than or equal to 0")
@@ -114,7 +129,10 @@ async def _run_generate(
     if is_interactive:
         ui.wait()
 
+
 async def main() -> None:
+    signal.signal(signal.SIGINT, _sigint_handler)
+    
     parser = _build_argument_parser()
     
     args_list = sys.argv[1:]
@@ -125,26 +143,43 @@ async def main() -> None:
     ui = ConsoleManager()
 
     async with NordClient() as client:
-        if args.command == "get-key":
-            await _run_get_key(ui, client, args.token or "")
+        if hasattr(args, "command") and args.command == "get-key":
+            await _run_get_key(ui, client, getattr(args, "token", ""))
         else:
+            args_dict = vars(args)
+            provided_args = set(args_dict.keys())
+            
+            token = args_dict.get("token", "")
+            dns = args_dict.get("dns", "103.86.96.100")
+            use_ip = args_dict.get("ip", False)
+            keepalive = args_dict.get("keepalive", 25)
+            exclude_dedicated = args_dict.get("exclude_dedicated", False)
+            
             internal_groups = None
-            if args.group:
-                internal_groups = [ALIAS_TO_GROUP_ID[g] for g in args.group]
+            if "group" in args_dict and args_dict["group"] is not None:
+                internal_groups = [ALIAS_TO_GROUP_ID[g] for g in args_dict["group"]]
+            
             prefs = UserPreferences(
-                dns=args.dns,
-                use_ip=args.ip,
-                keepalive=args.keepalive,
+                dns=dns,
+                use_ip=use_ip,
+                keepalive=keepalive,
                 groups=internal_groups,
-                exclude_dedicated=args.exclude_dedicated,
+                exclude_dedicated=exclude_dedicated,
             )
-            await _run_generate(ui, client, args.token or "", prefs)
+            
+            if "ip" in provided_args:
+                provided_args.add("use_ip")
+                
+            await _run_generate(ui, client, token, prefs, provided_args)
+
 
 def cli_entry_point() -> None:
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    except (KeyboardInterrupt, EOFError, asyncio.CancelledError):
+        print("\n\033[91m✗ Operation cancelled by user\033[0m")
+        os._exit(130)
+
 
 if __name__ == "__main__":
     cli_entry_point()

@@ -82,20 +82,15 @@ class Generator:
             )
 
         try:
+            all_jobs = standard_jobs + best_jobs
             await asyncio.to_thread(
-                self._materialize_directories, standard_jobs + best_jobs
+                self._materialize_directories, all_jobs
             )
 
             with self.ui.progress() as progress:
-                std_task = progress.add_task("Standard Configs", total=len(standard_jobs))
-                best_task = progress.add_task("Optimized Configs", total=len(best_jobs))
-                await asyncio.gather(
-                    asyncio.to_thread(
-                        self._write_jobs_parallel, standard_jobs, progress, std_task
-                    ),
-                    asyncio.to_thread(
-                        self._write_jobs_parallel, best_jobs, progress, best_task
-                    ),
+                task = progress.add_task("Writing all configs", total=len(all_jobs))
+                await asyncio.to_thread(
+                    self._write_jobs_parallel, all_jobs, progress, task
                 )
         except OSError as err:
             self.ui.fail(f"Filesystem error: {err}")

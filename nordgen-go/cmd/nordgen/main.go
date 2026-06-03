@@ -112,8 +112,9 @@ func runGetKey(consoleManager *ui.ConsoleManager, nordClient *client.NordClient,
 	}
 }
 
-func runGenerate(consoleManager *ui.ConsoleManager, nordClient *client.NordClient, token string, prefs models.UserPreferences) {
+func runGenerate(consoleManager *ui.ConsoleManager, nordClient *client.NordClient, token string, prefs models.UserPreferences, provided map[string]bool) {
 	isInteractive := token == ""
+	promptPrefs := len(provided) == 0
 
 	consoleManager.Header()
 	key := resolvePrivateKey(consoleManager, nordClient, token)
@@ -124,9 +125,9 @@ func runGenerate(consoleManager *ui.ConsoleManager, nordClient *client.NordClien
 		return
 	}
 
-	if isInteractive {
+	if promptPrefs {
 		consoleManager.ClearScreen()
-		prefs = consoleManager.PromptPreferences(prefs)
+		prefs = consoleManager.PromptPreferences(prefs, provided)
 		consoleManager.ClearScreen()
 	}
 
@@ -243,6 +244,24 @@ func main() {
 		normalizedArgs := normalizeGroupArgs(parseArgs)
 		genCmd.Parse(normalizedArgs)
 
+		providedArgs := make(map[string]bool)
+		genCmd.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "t", "token":
+				providedArgs["token"] = true
+			case "d", "dns":
+				providedArgs["dns"] = true
+			case "i", "ip":
+				providedArgs["use_ip"] = true
+			case "k", "keepalive":
+				providedArgs["keepalive"] = true
+			case "e", "exclude-dedicated":
+				providedArgs["exclude_dedicated"] = true
+			case "g", "group":
+				providedArgs["group"] = true
+			}
+		})
+
 		var internalGroups []string
 		for _, g := range genGroups {
 			if alias, exists := constants.AliasToGroupID[g]; exists {
@@ -257,7 +276,7 @@ func main() {
 			Groups:           internalGroups,
 			ExcludeDedicated: genExclude,
 		}
-		runGenerate(consoleManager, nordClient, genToken, prefs)
+		runGenerate(consoleManager, nordClient, genToken, prefs, providedArgs)
 	default:
 		consoleManager.Fail("Unknown command: " + cmd)
 		printHelp()

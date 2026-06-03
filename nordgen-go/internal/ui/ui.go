@@ -34,7 +34,7 @@ func NewConsoleManager() *ConsoleManager {
 	return &ConsoleManager{
 		reader:     bufio.NewReader(os.Stdin),
 		output:     os.Stdout,
-		isTerminal: term.IsTerminal(int(os.Stdout.Fd())),
+		isTerminal: term.IsTerminal(int(os.Stdin.Fd())),
 	}
 }
 
@@ -95,12 +95,13 @@ func (c *ConsoleManager) PromptSecret(message string) string {
 
 		switch b {
 		case '\r', '\n':
-			fmt.Fprintln(c.output)
+			fmt.Fprintf(c.output, "\r\n")
 			term.Restore(int(os.Stdin.Fd()), oldState)
 			return strings.TrimSpace(string(buf))
 		case 3:
-			fmt.Fprintln(c.output)
 			term.Restore(int(os.Stdin.Fd()), oldState)
+			fmt.Fprintf(c.output, "\r\n\033[91m✗ Operation cancelled by user\033[0m\r\n")
+			os.Exit(130)
 			return ""
 		case 127, 8:
 			if len(buf) > 0 {
@@ -115,24 +116,52 @@ func (c *ConsoleManager) PromptSecret(message string) string {
 		}
 	}
 
-	fmt.Fprintln(c.output)
+	fmt.Fprintf(c.output, "\r\n")
 	term.Restore(int(os.Stdin.Fd()), oldState)
 	return strings.TrimSpace(string(buf))
 }
 
-func (c *ConsoleManager) PromptPreferences(defaults models.UserPreferences) models.UserPreferences {
-	c.Info("Configuration Options (Enter for default)")
+func (c *ConsoleManager) PromptPreferences(defaults models.UserPreferences, provided map[string]bool) models.UserPreferences {
+	promptedAny := false
 
-	dns := c.promptString("DNS IP", defaults.DNS)
-	useIP := c.promptBool("Use IP for endpoints?", defaults.UseIP)
-	keepaliveString := c.promptString("PersistentKeepalive", strconv.Itoa(defaults.Keepalive))
-
-	keepalive, err := strconv.Atoi(keepaliveString)
-	if err != nil {
-		keepalive = defaults.Keepalive
+	dns := defaults.DNS
+	if !provided["dns"] {
+		if !promptedAny {
+			c.Info("Configuration Options (Enter for default)")
+			promptedAny = true
+		}
+		dns = c.promptString("DNS IP", defaults.DNS)
 	}
 
-	excludeDedicated := c.promptBool("Exclude dedicated IP servers?", defaults.ExcludeDedicated)
+	useIP := defaults.UseIP
+	if !provided["use_ip"] {
+		if !promptedAny {
+			c.Info("Configuration Options (Enter for default)")
+			promptedAny = true
+		}
+		useIP = c.promptBool("Use IP for endpoints?", defaults.UseIP)
+	}
+
+	keepalive := defaults.Keepalive
+	if !provided["keepalive"] {
+		if !promptedAny {
+			c.Info("Configuration Options (Enter for default)")
+			promptedAny = true
+		}
+		keepaliveString := c.promptString("PersistentKeepalive", strconv.Itoa(defaults.Keepalive))
+		if k, err := strconv.Atoi(keepaliveString); err == nil {
+			keepalive = k
+		}
+	}
+
+	excludeDedicated := defaults.ExcludeDedicated
+	if !provided["exclude_dedicated"] {
+		if !promptedAny {
+			c.Info("Configuration Options (Enter for default)")
+			promptedAny = true
+		}
+		excludeDedicated = c.promptBool("Exclude dedicated IP servers?", defaults.ExcludeDedicated)
+	}
 
 	return models.UserPreferences{
 		DNS:              dns,
@@ -271,18 +300,22 @@ func (c *ConsoleManager) ShowKey(key string) {
 }
 
 func (c *ConsoleManager) Summary(outputPath string, stats models.GenerationStats, duration float64) {
-	line := strings.Repeat("=", 40)
+	line := strings.Repeat("=", 45)
 	fmt.Fprintf(c.output, "\n%s\n", c.applyColor("37", line))
 	fmt.Fprintf(c.output, "%s\n", c.applyColor("1;97", "  Complete"))
 	fmt.Fprintf(c.output, "%s\n", c.applyColor("37", line))
-	fmt.Fprintf(c.output, "  Output Directory:  %s\n", c.applyColor("96", outputPath))
-	fmt.Fprintf(c.output, "  Standard Configs:  %s\n", c.applyColor("96", strconv.Itoa(stats.Total)))
-	fmt.Fprintf(c.output, "  Optimized Configs: %s\n", c.applyColor("96", strconv.Itoa(stats.Best)))
-	fmt.Fprintf(c.output, "  Duration:          %s\n", c.applyColor("96", fmt.Sprintf("%.2fs", duration)))
+	fmt.Fprintf(c.output, "  Output Directory:    %s\n", c.applyColor("96", outputPath))
+	fmt.Fprintf(c.output, "  Total Files Written: %s\n", c.applyColor("96", strconv.Itoa(stats.Total+stats.Best)))
+	fmt.Fprintf(c.output, "   ├── Standard:       %s\n", c.applyColor("96", strconv.Itoa(stats.Total)))
+	fmt.Fprintf(c.output, "   └── Optimized:      %s\n", c.applyColor("96", strconv.Itoa(stats.Best)))
+	fmt.Fprintf(c.output, "  Duration:            %s\n", c.applyColor("96", fmt.Sprintf("%.2fs", duration)))
 	fmt.Fprintf(c.output, "%s\n\n", c.applyColor("37", line))
 }
 
 func (c *ConsoleManager) Wait() {
+	if !c.isTerminal {
+		return
+	}
 	fmt.Fprint(c.output, c.applyColor("37", "Press Enter to exit... "))
 	c.reader.ReadBytes('\n')
 }
